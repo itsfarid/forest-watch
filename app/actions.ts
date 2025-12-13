@@ -20,3 +20,15 @@ export async function continueConversation(messages: Message[]) {
     ],
   };
 }
+
+export async function checkAIAvailability() {
+  // Check if API key exists
+  const hasApiKey = !!process.env.ROBOFLOW_API_KEY;
+  
+  return {
+    available: hasApiKey,
+    message: hasApiKey 
+      ? 'AI detection is ready' 
+      : 'Please configure ROBOFLOW_API_KEY in environment variables',
+  };
+}
