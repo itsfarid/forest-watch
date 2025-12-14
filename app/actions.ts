@@ -55,7 +55,7 @@ export async function analyzeForestImage(imageUrl: string) {
         };
     
     const response = await fetch(
-      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4',
+      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=70&overlap=30',
       {
         method: 'POST',
         headers: {
