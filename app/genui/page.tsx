@@ -8,35 +8,68 @@ import { Button } from '@/components/ui/button';
 import { IconArrowUp } from '@/components/ui/icons';
 import GenUICard from '@/components/cards/genuicard';
 
-// Icon Paperclip sederhana untuk tombol upload
+// Icon Paperclip
 const IconPaperclip = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
   </svg>
 );
 
-export const maxDuration = 30;
+export const maxDuration = 60; // Naikkan durasi timeout
 
 export default function GenUI() {
   const [conversation, setConversation] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
   
-  // State baru untuk Upload Image
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // Tambah state loading
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- 1. Logic Handle File (Upload & Drag-Drop) ---
-  const processFile = (file: File) => {
+  // --- UTILITY: Compress Image agar tidak error "Payload Too Large" ---
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          // Roboflow biasanya inference di 640x640, jadi kita resize ke max 800px sudah cukup
+          const MAX_WIDTH = 800;
+          const scaleSize = MAX_WIDTH / img.width;
+          const width = MAX_WIDTH;
+          const height = img.height * scaleSize;
+
+          canvas.width = width;
+          canvas.height = height;
+          
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          // Convert ke JPEG quality 0.7 (cukup bagus tapi size kecil)
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(compressedBase64);
+        };
+      };
+    });
+  };
+
+  // --- Logic Handle File ---
+  const processFile = async (file: File) => {
     if (!file.type.startsWith('image/')) {
       alert('Please upload an image file');
       return;
     }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setSelectedImage(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    
+    try {
+      // Compress dulu sebelum simpan ke state!
+      const compressedData = await compressImage(file);
+      setSelectedImage(compressedData);
+    } catch (e) {
+      console.error("Gagal memproses gambar", e);
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,42 +93,44 @@ export default function GenUI() {
     const file = e.dataTransfer.files?.[0];
     if (file) processFile(file);
   };
-  // -----------------------------------------------
 
   const handleSubmit = async () => {
     const contentToSend = selectedImage || input;
     if (!contentToSend.trim()) return;
 
-    // Tentukan pesan user untuk UI (Optimistic Update)
+    setIsLoading(true); // Mulai loading
+
     const newUserMessage: Message = {
       role: 'user',
-      // Jika ada gambar, content sebenarnya adalah base64 string agar server paham
-      // Tapi kita simpan text input pengguna sebagai 'caption' jika mau (opsional),
-      // Di sini kita kirim base64 jika ada, atau text jika tidak.
       content: selectedImage || input, 
-      // Kita manfaatkan properti visualizedImage untuk menampilkan preview upload user juga
       visualizedImage: selectedImage || undefined
     };
 
-    // Reset Input UI
     setInput("");
     setSelectedImage(null);
 
-    // Update state lokal dulu
     const newHistory = [...conversation, newUserMessage];
     setConversation(newHistory);
 
-    // Panggil Server Action
-    const { messages } = await continueConversation([
-      // Map pesan agar sesuai struktur yang diminta server
-      ...newHistory.map(({ role, content, visualizedImage }) => ({ 
-        role, 
-        content,
-        visualizedImage 
-      }))
-    ]);
-    
-    setConversation(messages);
+    try {
+      const { messages } = await continueConversation([
+        ...newHistory.map(({ role, content, visualizedImage }) => ({ 
+          role, 
+          content,
+          visualizedImage 
+        }))
+      ]);
+      setConversation(messages);
+    } catch (error) {
+      console.error("Error submitting:", error);
+      // Tampilkan error ke chat bubble jika gagal
+      setConversation([
+        ...newHistory,
+        { role: 'assistant', content: "❌ Gagal menganalisis gambar. Pastikan API Key benar atau coba gambar lain." }
+      ]);
+    } finally {
+      setIsLoading(false); // Selesai loading
+    }
   } 
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -117,14 +152,12 @@ export default function GenUI() {
             <div key={index} className="whitespace-pre-wrap flex mb-5">
               <div className={`${message.role === 'user' ? 'bg-slate-200 ml-auto' : 'bg-transparent w-full'} p-3 rounded-lg max-w-[85%]`}>
                 
-                {/* Tampilkan Text (Kecuali jika itu raw base64 image string yang panjang, kita sembunyikan textnya agar rapi) */}
                 {(!message.content.startsWith('data:image') || message.role === 'assistant') && (
                   <div>
                     {message.content}
                   </div>
                 )}
                 
-                {/* --- PERBAIKAN UTAMA: Render Gambar (Preview User atau Hasil AI) --- */}
                 {message.visualizedImage && (
                   <div className="mt-2 rounded-md overflow-hidden border border-gray-300 bg-black/5">
                     <img 
@@ -141,13 +174,22 @@ export default function GenUI() {
               </div>
             </div>
           ))}
+          
+          {/* Indikator Loading */}
+          {isLoading && (
+            <div className="flex mb-5">
+               <div className="bg-transparent w-full p-3 text-gray-500 italic animate-pulse">
+                 🤖 Analyzing forest data...
+               </div>
+            </div>
+          )}
         </div>
 
-        {/* --- INPUT AREA & PREVIEW --- */}
+        {/* INPUT AREA */}
         <div className="fixed inset-x-0 bottom-10 w-full z-10 px-4">
           <div className="w-full max-w-xl mx-auto">
             
-            {/* Preview Image Sebelum Dikirim */}
+            {/* Preview Image */}
             {selectedImage && (
               <div className="mb-2 relative w-fit animate-in fade-in slide-in-from-bottom-2">
                 <div className="relative rounded-lg overflow-hidden border border-slate-300 shadow-md">
@@ -162,7 +204,6 @@ export default function GenUI() {
               </div>
             )}
 
-            {/* Input Card dengan Drag & Drop */}
             <Card 
               className={`p-2 transition-colors duration-200 ${isDragging ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' : ''}`}
               onDragOver={handleDragOver}
@@ -170,8 +211,6 @@ export default function GenUI() {
               onDrop={handleDrop}
             >
               <div className="flex items-center gap-2">
-                
-                {/* Tombol Upload */}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -196,15 +235,15 @@ export default function GenUI() {
                   onChange={event => setInput(event.target.value)}
                   className="flex-1 border-0 shadow-none focus-visible:ring-0 px-2"
                   placeholder={selectedImage ? "Describe this image..." : "Ask me anything or drop an image..."}
-                  disabled={!!selectedImage} // Optional: disable text input jika gambar dipilih (atau biarkan enabled untuk caption)
+                  disabled={isLoading || !!selectedImage}
                 />
                 
                 <Button
                   onClick={handleSubmit}
-                  disabled={!input.trim() && !selectedImage}
+                  disabled={isLoading || (!input.trim() && !selectedImage)}
                   className="shrink-0"
                 >
-                  <IconArrowUp />
+                  {isLoading ? <div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent" /> : <IconArrowUp />}
                 </Button> 
               </div>
             </Card>
