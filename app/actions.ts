@@ -107,11 +107,15 @@ export async function continueConversation(messages: Message[]) {
         const result = await analyzeForestImage(imageUrl);
         
         const outputs = result.outputs || [];
-        const detectionCount = outputs.find(o => o.count_objects !== undefined)?.count_objects || 0;
-        const predictions = outputs.find(o => o.predictions)?.predictions || [];
+        
+        // Safe extraction with fallbacks
+        const firstOutput = outputs[0] || {};
+        const detectionCount = firstOutput.count_objects || 0;
+        const predictions = Array.isArray(firstOutput.predictions) ? firstOutput.predictions : [];
         
         console.log('Detection count:', detectionCount);
         console.log('Predictions:', predictions);
+        console.log('Predictions length:', predictions.length);
         
         let responseContent = `🌲 Forest Analysis Results:\n\n`;
         
@@ -121,7 +125,7 @@ export async function continueConversation(messages: Message[]) {
           responseContent += `The analyzed area appears to be healthy forest with no deforestation indicators detected.`;
         } else {
           // Count unique classes
-          const classNames = predictions.map(p => p.class);
+          const classNames = predictions.map((p: any) => p.class);
           const uniqueClasses = Array.from(new Set(classNames));
           
           console.log('Unique classes:', uniqueClasses);
@@ -142,9 +146,9 @@ export async function continueConversation(messages: Message[]) {
           
           responseContent += `Detected indicators:\n`;
           uniqueClasses.forEach((cls, idx) => {
-            const classItems = predictions.filter(p => p.class === cls);
+            const classItems = predictions.filter((p: any) => p.class === cls);
             const count = classItems.length;
-            const totalConf = classItems.reduce((sum, p) => sum + p.confidence, 0);
+            const totalConf = classItems.reduce((sum: number, p: any) => sum + p.confidence, 0);
             const avgConf = totalConf / count;
             responseContent += `${idx + 1}. ${cls}: ${count} areas (${(avgConf * 100).toFixed(1)}% confidence)\n`;
           });
