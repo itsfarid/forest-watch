@@ -69,57 +69,77 @@ export async function analyzeForestImage(imageUrl: string) {
 export async function continueConversation(messages: Message[]) {
   const lastMessage = messages[messages.length - 1];
   
-  // Check if message contains image URL
-  const urlPattern = /(https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp))/gi;
-  const imageUrls = lastMessage.content.match(urlPattern);
+  // Check if message contains image URL (improved regex)
+  const urlPattern = /https?:\/\/[^\s]+/gi;
+  const urls = lastMessage.content.match(urlPattern);
   
-  if (imageUrls && imageUrls.length > 0) {
-    try {
-      const result = await analyzeForestImage(imageUrls[0]);
-      
-      // Extract analysis results
-      const outputs = result.outputs || [];
-      const detectionCount = outputs.find(o => o.count_objects !== undefined)?.count_objects || 0;
-      const predictions = outputs.find(o => o.predictions)?.predictions || [];
-      const visualizedImage = outputs.find(o => o.output_image)?.output_image?.value;
-      
-      let responseContent = `🌲 Forest Analysis Results:\n\n`;
-      responseContent += `📊 Detections found: ${detectionCount}\n\n`;
-      
-      if (predictions.length > 0) {
-        responseContent += `Detected objects:\n`;
-        predictions.forEach((pred, idx) => {
-          responseContent += `${idx + 1}. ${pred.class} (${(pred.confidence * 100).toFixed(1)}% confidence)\n`;
-        });
+  if (urls && urls.length > 0) {
+    const imageUrl = urls[0];
+    
+    // Check if URL looks like an image
+    const isImageUrl = /\.(jpg|jpeg|png|gif|webp|bmp)(\?.*)?$/i.test(imageUrl) || 
+                      imageUrl.includes('unsplash.com') ||
+                      imageUrl.includes('images') ||
+                      imageUrl.includes('photo');
+    
+    if (isImageUrl) {
+      try {
+        const result = await analyzeForestImage(imageUrl);
+        
+        // Extract analysis results
+        const outputs = result.outputs || [];
+        const detectionCount = outputs.find(o => o.count_objects !== undefined)?.count_objects || 0;
+        const predictions = outputs.find(o => o.predictions)?.predictions || [];
+        const visualizedImage = outputs.find(o => o.output_image)?.output_image?.value;
+        
+        let responseContent = `🌲 Forest Analysis Results:\n\n`;
+        responseContent += `📊 Objects detected: ${detectionCount}\n\n`;
+        
+        if (predictions.length > 0) {
+          responseContent += `Detected objects:\n`;
+          const uniqueClasses = [...new Set(predictions.map(p => p.class))];
+          uniqueClasses.forEach((cls, idx) => {
+            const count = predictions.filter(p => p.class === cls).length;
+            const avgConf = predictions
+              .filter(p => p.class === cls)
+              .reduce((sum, p) => sum + p.confidence, 0) / count;
+            responseContent += `${idx + 1}. ${cls}: ${count} items (avg ${(avgConf * 100).toFixed(1)}% confidence)\n`;
+          });
+        }
+        
+        if (visualizedImage) {
+          responseContent += `\n✅ Analysis complete with visualization`;
+        }
+        
+        if (detectionCount === 0) {
+          responseContent = `🌲 Forest Analysis Results:\n\n✅ No deforestation indicators detected in this image.\nThe area appears to be healthy forest.`;
+        }
+        
+        return {
+          messages: [
+            ...messages,
+            {
+              role: 'assistant' as const,
+              content: responseContent,
+            },
+          ],
+        };
+      } catch (error) {
+        console.error('Full error:', error);
+        return {
+          messages: [
+            ...messages,
+            {
+              role: 'assistant' as const,
+              content: `❌ Error analyzing image: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease try:\n1. Check if the image URL is publicly accessible\n2. Try a different image URL\n3. Make sure the URL is a direct link to an image file`,
+            },
+          ],
+        };
       }
-      
-      if (visualizedImage) {
-        responseContent += `\n✅ Visualization generated successfully`;
-      }
-      
-      return {
-        messages: [
-          ...messages,
-          {
-            role: 'assistant' as const,
-            content: responseContent,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        messages: [
-          ...messages,
-          {
-            role: 'assistant' as const,
-            content: `❌ Error analyzing image: ${error instanceof Error ? error.message : 'Unknown error'}. Please make sure you provide a valid image URL.`,
-          },
-        ],
-      };
     }
   }
   
-  // If no image URL, provide instructions
+  // If no valid image URL, provide instructions
   return {
     messages: [
       ...messages,
