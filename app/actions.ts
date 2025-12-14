@@ -1,80 +1,112 @@
 'use server';
 
-/* ... (Kode interface dan analyzeForestImage sama seperti sebelumnya) ... */
-
-// Interface Message kamu
+// Ubah interface: Ganti 'display' menjadi 'visualizedImage' (string)
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
-  display?: React.ReactNode; // Kita akan pakai ini untuk menampilkan gambar hasil
+  visualizedImage?: string; // Data gambar hasil deteksi (base64)
 }
 
-// ... (Simpan bagian analyzeForestImage seperti aslinya) ...
+interface RoboflowResponse {
+  outputs: Array<{
+    output_image?: {
+      type: string;
+      value: string;
+    };
+    count_objects?: number;
+    predictions?: Array<{
+      class: string;
+      confidence: number;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }>;
+  }>;
+}
+
+export async function analyzeForestImage(imageUrl: string) {
+  const apiKey = process.env.ROBOFLOW_API_KEY;
+   
+  if (!apiKey) {
+    throw new Error('ROBOFLOW_API_KEY not configured');
+  }
+
+  try {
+    console.log('Calling Roboflow with URL:', imageUrl);
+    
+    const response = await fetch(
+      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          api_key: apiKey,
+          inputs: {
+            image: { 
+              type: imageUrl.startsWith('data:') ? 'base64' : 'url', 
+              value: imageUrl.startsWith('data:') ? imageUrl.split(',')[1] : imageUrl 
+            },
+          },
+        }),
+      }
+    );
+
+    const responseText = await response.text();
+    console.log('Roboflow response status:', response.status);
+
+    if (!response.ok) {
+      throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
+    }
+
+    const result: RoboflowResponse = JSON.parse(responseText);
+    return result;
+  } catch (error) {
+    console.error('Error calling Roboflow:', error);
+    throw error;
+  }
+}
 
 export async function continueConversation(messages: Message[]) {
   const lastMessage = messages[messages.length - 1];
   
-  // Logic untuk mengecek apakah pesan berisi Base64 Image atau URL
   const isBase64 = lastMessage.content.startsWith('data:image/');
-  
-  // Regex sederhana untuk URL
   const urlPattern = /https?:\/\/[^\s]+/gi;
   const urls = lastMessage.content.match(urlPattern);
   const imageUrl = isBase64 ? lastMessage.content : (urls ? urls[0] : null);
-
-  // Jika ada gambar (baik base64 atau URL)
+   
   if (imageUrl) {
     try {
-      // 1. Panggil Roboflow
       const result = await analyzeForestImage(imageUrl);
       
       const outputs = result.outputs || [];
       const detectionCount = outputs.find(o => o.count_objects !== undefined)?.count_objects || 0;
       const predictions = outputs.find(o => o.predictions)?.predictions || [];
       
-      // Ambil gambar hasil visualisasi (biasanya base64 tanpa prefix)
+      // Ambil data gambar mentah saja
       const visualizedImageRaw = outputs.find(o => o.output_image)?.output_image?.value;
       
-      // Format hasil teks
       let responseContent = `🌲 Forest Analysis Results:\n\n`;
       responseContent += `📊 Objects detected: ${detectionCount}\n\n`;
       
       if (predictions.length > 0) {
-        // ... (Logika text predictions sama seperti kodemu) ...
-         const classNames = predictions.map(p => p.class);
-         const uniqueClasses = Array.from(new Set(classNames));
-         uniqueClasses.forEach((cls, idx) => {
-            const classItems = predictions.filter(p => p.class === cls);
-            const count = classItems.length;
-            const totalConf = classItems.reduce((sum, p) => sum + p.confidence, 0);
-            const avgConf = totalConf / count;
-            responseContent += `${idx + 1}. ${cls}: ${count} items (avg ${(avgConf * 100).toFixed(1)}% confidence)\n`;
-         });
+        responseContent += `Detected objects:\n`;
+        const classNames = predictions.map(p => p.class);
+        const uniqueClasses = Array.from(new Set(classNames));
+        
+        uniqueClasses.forEach((cls, idx) => {
+          const classItems = predictions.filter(p => p.class === cls);
+          const count = classItems.length;
+          const totalConf = classItems.reduce((sum, p) => sum + p.confidence, 0);
+          const avgConf = totalConf / count;
+          responseContent += `${idx + 1}. ${cls}: ${count} items (avg ${(avgConf * 100).toFixed(1)}% confidence)\n`;
+        });
       }
-
-      // 2. Siapkan komponen tampilan (Display) untuk Gambar Hasil
-      let displayComponent = null;
-
-      if (visualizedImageRaw) {
-        // Pastikan formatnya data URI yang benar
-        const resultImageSrc = visualizedImageRaw.startsWith('data:') 
-          ? visualizedImageRaw 
-          : `data:image/jpeg;base64,${visualizedImageRaw}`;
-
-        // Kita kirim element gambar sebagai display
-        // Catatan: Karena ini Server Action, kita kembalikan struktur data yang nanti dirender client
-        // atau string HTML simple jika menggunakan dangerouslySetInnerHTML, 
-        // tapi cara paling aman di Next.js 'use server' dengan interface ReactNode adalah seperti ini:
-        displayComponent = (
-           <div className="mt-4 rounded-lg overflow-hidden border border-gray-200">
-             <p className="text-sm text-gray-500 mb-2 p-2 bg-gray-50">Visualized Result:</p>
-             <img src={resultImageSrc} alt="Analysis Result" className="w-full h-auto" />
-           </div>
-        );
-      }
-
+      
       if (detectionCount === 0) {
-        responseContent = `🌲 Forest Analysis Results:\n\n✅ No deforestation indicators detected. Healthy forest area.`;
+        responseContent = `🌲 Forest Analysis Results:\n\n✅ No deforestation indicators detected in this image.\nThe area appears to be healthy forest.`;
       }
       
       return {
@@ -83,35 +115,43 @@ export async function continueConversation(messages: Message[]) {
           {
             role: 'assistant' as const,
             content: responseContent,
-            display: displayComponent, // Sertakan gambar hasil di sini
+            visualizedImage: visualizedImageRaw, // Kirim data string saja, bukan JSX
           },
         ],
       };
-
     } catch (error) {
-      console.error('Error:', error);
+      console.error('Full error:', error);
       return {
         messages: [
           ...messages,
           {
             role: 'assistant' as const,
-            content: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            content: `❌ Error analyzing image: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease try:\n1. Check if the image URL is publicly accessible\n2. Try a different image URL\n3. Make sure the URL is a direct link to an image file`,
           },
         ],
       };
     }
   }
   
-  // Default response jika tidak ada gambar
+  // Default fallback
   return {
     messages: [
       ...messages,
       {
         role: 'assistant' as const,
-        content: `🌲 Forest Watch AI Ready.\nUpload an image or send a URL.`,
+        content: `🌲 Forest Watch AI\n\nPlease provide an image URL to analyze for deforestation detection, or upload an image file.\n\nExample:\nhttps://example.com/forest-image.jpg\n\nI'll detect and count objects related to deforestation in the image.`,
       },
     ],
   };
 }
 
-// ... (checkAIAvailability tetap sama)
+export async function checkAIAvailability() {
+  const hasApiKey = !!process.env.ROBOFLOW_API_KEY;
+   
+  return {
+    available: hasApiKey,
+    message: hasApiKey 
+      ? '🌲 Forest detection AI is ready' 
+      : '⚠️ Please configure ROBOFLOW_API_KEY in environment variables',
+  };
+}
