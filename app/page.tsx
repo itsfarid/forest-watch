@@ -6,17 +6,13 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { IconArrowUp } from '@/components/ui/icons';
-// HAPUS IMPORT GenUICard KARENA TIDAK DIPAKAI LAGI
-// import GenUICard from '@/components/cards/genuicard'; 
 
-// Icon Paperclip
 const IconPaperclip = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
   </svg>
 );
 
-// Icon Pohon untuk Welcome Screen
 const IconTree = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M12 10a6 6 0 0 0-6 6h12a6 6 0 0 0-6-6Z"/><path d="M12 2a8 8 0 0 0-8 8v12h16V10a8 8 0 0 0-8-8Z"/><path d="M12 14v8"/>
@@ -28,13 +24,11 @@ export const maxDuration = 60;
 export default function Home() {
   const [conversation, setConversation] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
-  
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- UTILITY: Compress Image ---
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -62,7 +56,6 @@ export default function Home() {
     });
   };
 
-  // --- Logic Handle File ---
   const processFile = async (file: File) => {
     if (!file.type.startsWith('image/')) {
       alert('Please upload an image file');
@@ -72,7 +65,7 @@ export default function Home() {
       const compressedData = await compressImage(file);
       setSelectedImage(compressedData);
     } catch (e) {
-      console.error("Gagal memproses gambar", e);
+      console.error("Failed to process image", e);
     }
   };
 
@@ -106,8 +99,7 @@ export default function Home() {
 
     const newUserMessage: Message = {
       role: 'user',
-      content: selectedImage || input, 
-      visualizedImage: selectedImage || undefined
+      content: selectedImage || input
     };
 
     setInput("");
@@ -117,38 +109,30 @@ export default function Home() {
     setConversation(newHistory);
 
     try {
-      const { messages } = await continueConversation([
-        ...newHistory.map(({ role, content, visualizedImage }) => ({ 
-          role, 
-          content,
-          visualizedImage 
-        }))
-      ]);
+      const { messages } = await continueConversation(newHistory);
       setConversation(messages);
     } catch (error) {
       console.error("Error submitting:", error);
       setConversation([
         ...newHistory,
-        { role: 'assistant', content: "❌ Gagal menganalisis gambar. Pastikan API Key benar atau coba gambar lain." }
+        { role: 'assistant', content: "❌ Failed to analyze image. Please check API Key or try another image." }
       ]);
     } finally {
       setIsLoading(false);
     }
-  } 
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       handleSubmit();
     }
-  }
+  };
 
   return (
     <div className="relative flex h-[calc(100vh_-_theme(spacing.16))] overflow-hidden pb-10 flex-col">
       <div className="group w-full overflow-auto">
         <div className="max-w-xl mx-auto mt-10 mb-32 px-4">
           
-          {/* --- BAGIAN INI YANG DIGANTI --- */}
-          {/* Jika belum ada pesan, tampilkan Welcome Screen Forest Watch */}
           {conversation.length <= 0 && (
             <div className="flex flex-col items-center justify-center h-[50vh] text-center space-y-4">
               <div className="p-4 bg-green-100 rounded-full text-green-600">
@@ -160,27 +144,25 @@ export default function Home() {
               </p>
             </div>
           )}
-          {/* ------------------------------- */}
 
           {conversation.map((message, index) => (
             <div key={index} className="whitespace-pre-wrap flex mb-5">
               <div className={`${message.role === 'user' ? 'bg-slate-200 ml-auto' : 'bg-transparent w-full'} p-3 rounded-lg max-w-[85%]`}>
                 
-                {(!message.content.startsWith('data:image') || message.role === 'assistant') && (
-                  <div>
-                    {message.content}
-                  </div>
+                {message.role === 'assistant' && (
+                  <div>{message.content}</div>
                 )}
                 
-                {message.visualizedImage && (
-                  <div className="mt-2 rounded-md overflow-hidden border border-gray-300 bg-black/5">
+                {message.role === 'user' && !message.content.startsWith('data:image') && (
+                  <div>{message.content}</div>
+                )}
+                
+                {message.role === 'user' && message.content.startsWith('data:image') && (
+                  <div className="rounded-md overflow-hidden border border-gray-300">
                     <img 
-                      src={message.visualizedImage.startsWith('data:') 
-                        ? message.visualizedImage 
-                        : `data:image/jpeg;base64,${message.visualizedImage}`
-                      } 
-                      alt="Result" 
-                      className="w-full h-auto object-contain max-h-80" 
+                      src={message.content} 
+                      alt="Uploaded" 
+                      className="w-full h-auto object-contain max-h-60" 
                     />
                   </div>
                 )}
@@ -198,7 +180,6 @@ export default function Home() {
           )}
         </div>
 
-        {/* INPUT AREA */}
         <div className="fixed inset-x-0 bottom-10 w-full z-10 px-4">
           <div className="w-full max-w-xl mx-auto">
             {selectedImage && (
@@ -239,7 +220,7 @@ export default function Home() {
                   onKeyDown={handleKeyDown}
                   onChange={event => setInput(event.target.value)}
                   className="flex-1 border-0 shadow-none focus-visible:ring-0 px-2"
-                  placeholder={selectedImage ? "Describe this image..." : "Ask me anything or drop an image..."}
+                  placeholder={selectedImage ? "Image selected, click send to analyze..." : "Paste image URL or upload..."}
                   disabled={isLoading || !!selectedImage}
                 />
                 
