@@ -110,34 +110,44 @@ export async function continueConversation(messages: Message[]) {
         const detectionCount = outputs.find(o => o.count_objects !== undefined)?.count_objects || 0;
         const predictions = outputs.find(o => o.predictions)?.predictions || [];
         
+        console.log('Detection count:', detectionCount);
+        console.log('Predictions:', predictions);
+        
         let responseContent = `🌲 Forest Analysis Results:\n\n`;
         
-        if (detectionCount === 0) {
+        // Check if there are any predictions
+        if (predictions.length === 0 || detectionCount === 0) {
           responseContent += `✅ Deforestation area: NOT FOUND\n\n`;
           responseContent += `The analyzed area appears to be healthy forest with no deforestation indicators detected.`;
         } else {
-          // Calculate percentage (assuming the detection count represents deforested areas)
-          // You can adjust this calculation based on your needs
-          const totalArea = 100; // baseline
-          const deforestationPercentage = ((detectionCount / totalArea) * 100).toFixed(1);
+          // Count unique classes
+          const classNames = predictions.map(p => p.class);
+          const uniqueClasses = Array.from(new Set(classNames));
           
-          responseContent += `⚠️ Deforestation area: DETECTED\n`;
+          console.log('Unique classes:', uniqueClasses);
+          
+          // Calculate severity based on detections
+          const deforestationPercentage = Math.min(((detectionCount / 100) * 100), 100).toFixed(1);
+          
+          let severity = 'LOW';
+          if (detectionCount > 120) {
+            severity = 'HIGH';
+          } else if (detectionCount > 80) {
+            severity = 'MEDIUM';
+          }
+          
+          responseContent += `⚠️ Deforestation area: DETECTED (${severity} SEVERITY)\n`;
           responseContent += `📊 Deforested areas found: ${detectionCount} locations\n`;
           responseContent += `📈 Estimated coverage: ~${deforestationPercentage}%\n\n`;
           
-          if (predictions.length > 0) {
-            responseContent += `Detected indicators:\n`;
-            const classNames = predictions.map(p => p.class);
-            const uniqueClasses = Array.from(new Set(classNames));
-            
-            uniqueClasses.forEach((cls, idx) => {
-              const classItems = predictions.filter(p => p.class === cls);
-              const count = classItems.length;
-              const totalConf = classItems.reduce((sum, p) => sum + p.confidence, 0);
-              const avgConf = totalConf / count;
-              responseContent += `${idx + 1}. ${cls}: ${count} areas (${(avgConf * 100).toFixed(1)}% confidence)\n`;
-            });
-          }
+          responseContent += `Detected indicators:\n`;
+          uniqueClasses.forEach((cls, idx) => {
+            const classItems = predictions.filter(p => p.class === cls);
+            const count = classItems.length;
+            const totalConf = classItems.reduce((sum, p) => sum + p.confidence, 0);
+            const avgConf = totalConf / count;
+            responseContent += `${idx + 1}. ${cls}: ${count} areas (${(avgConf * 100).toFixed(1)}% confidence)\n`;
+          });
         }
         
         return {
