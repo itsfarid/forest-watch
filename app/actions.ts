@@ -10,7 +10,7 @@ interface RoboflowResponse {
   outputs: Array<{
     output_image?: {
       type: string;
-      value: string; // base64 image
+      value: string;
     };
     count_objects?: number;
     predictions?: Array<{
@@ -69,14 +69,12 @@ export async function analyzeForestImage(imageUrl: string) {
 export async function continueConversation(messages: Message[]) {
   const lastMessage = messages[messages.length - 1];
   
-  // Check if message contains image URL (improved regex)
   const urlPattern = /https?:\/\/[^\s]+/gi;
   const urls = lastMessage.content.match(urlPattern);
   
   if (urls && urls.length > 0) {
     const imageUrl = urls[0];
     
-    // Check if URL looks like an image
     const isImageUrl = /\.(jpg|jpeg|png|gif|webp|bmp)(\?.*)?$/i.test(imageUrl) || 
                       imageUrl.includes('unsplash.com') ||
                       imageUrl.includes('images') ||
@@ -86,7 +84,6 @@ export async function continueConversation(messages: Message[]) {
       try {
         const result = await analyzeForestImage(imageUrl);
         
-        // Extract analysis results
         const outputs = result.outputs || [];
         const detectionCount = outputs.find(o => o.count_objects !== undefined)?.count_objects || 0;
         const predictions = outputs.find(o => o.predictions)?.predictions || [];
@@ -139,7 +136,6 @@ export async function continueConversation(messages: Message[]) {
     }
   }
   
-  // If no valid image URL, provide instructions
   return {
     messages: [
       ...messages,
