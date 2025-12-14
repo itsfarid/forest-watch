@@ -106,6 +106,11 @@ export async function continueConversation(messages: Message[]) {
       try {
         const result = await analyzeForestImage(imageUrl);
         
+        // LOG FULL RESPONSE untuk debugging
+        console.log('=== FULL ROBOFLOW RESPONSE ===');
+        console.log(JSON.stringify(result, null, 2));
+        console.log('==============================');
+        
         const outputs = result.outputs || [];
         
         // Safe extraction with fallbacks
@@ -114,8 +119,8 @@ export async function continueConversation(messages: Message[]) {
         const predictions = Array.isArray(firstOutput.predictions) ? firstOutput.predictions : [];
         
         console.log('Detection count:', detectionCount);
-        console.log('Predictions:', predictions);
-        console.log('Predictions length:', predictions.length);
+        console.log('Predictions array length:', predictions.length);
+        console.log('First output keys:', Object.keys(firstOutput));
         
         let responseContent = `🌲 Forest Analysis Results:\n\n`;
         
