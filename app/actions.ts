@@ -35,7 +35,7 @@ export async function analyzeForestImage(imageUrl: string) {
     console.log('Calling Roboflow with URL:', imageUrl);
     
     // Konfigurasi API: confidence=40 (minimal yakin 40%), overlap=30 (gabungkan kotak yang tumpang tindih)
-    const roboflowUrl = 'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=40&overlap=30';
+    const roboflowUrl = 'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=70&overlap=30';
     
     const response = await fetch(
       roboflowUrl,
