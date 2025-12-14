@@ -6,12 +6,20 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { IconArrowUp } from '@/components/ui/icons';
-import GenUICard from '@/components/cards/genuicard';
+// HAPUS IMPORT GenUICard KARENA TIDAK DIPAKAI LAGI
+// import GenUICard from '@/components/cards/genuicard'; 
 
 // Icon Paperclip
 const IconPaperclip = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </svg>
+);
+
+// Icon Pohon untuk Welcome Screen
+const IconTree = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 10a6 6 0 0 0-6 6h12a6 6 0 0 0-6-6Z"/><path d="M12 2a8 8 0 0 0-8 8v12h16V10a8 8 0 0 0-8-8Z"/><path d="M12 14v8"/>
   </svg>
 );
 
@@ -60,7 +68,6 @@ export default function Home() {
       alert('Please upload an image file');
       return;
     }
-    
     try {
       const compressedData = await compressImage(file);
       setSelectedImage(compressedData);
@@ -140,9 +147,20 @@ export default function Home() {
       <div className="group w-full overflow-auto">
         <div className="max-w-xl mx-auto mt-10 mb-32 px-4">
           
+          {/* --- BAGIAN INI YANG DIGANTI --- */}
+          {/* Jika belum ada pesan, tampilkan Welcome Screen Forest Watch */}
           {conversation.length <= 0 && (
-            <GenUICard />
+            <div className="flex flex-col items-center justify-center h-[50vh] text-center space-y-4">
+              <div className="p-4 bg-green-100 rounded-full text-green-600">
+                <IconTree className="w-12 h-12" />
+              </div>
+              <h1 className="text-2xl font-bold text-gray-800">🌲 Forest Watch AI</h1>
+              <p className="text-gray-500 max-w-sm">
+                Upload forest photos or satellite imagery to automatically detect potential deforestation.
+              </p>
+            </div>
           )}
+          {/* ------------------------------- */}
 
           {conversation.map((message, index) => (
             <div key={index} className="whitespace-pre-wrap flex mb-5">
@@ -183,8 +201,6 @@ export default function Home() {
         {/* INPUT AREA */}
         <div className="fixed inset-x-0 bottom-10 w-full z-10 px-4">
           <div className="w-full max-w-xl mx-auto">
-            
-            {/* Preview Image */}
             {selectedImage && (
               <div className="mb-2 relative w-fit animate-in fade-in slide-in-from-bottom-2">
                 <div className="relative rounded-lg overflow-hidden border border-slate-300 shadow-md">
@@ -214,13 +230,7 @@ export default function Home() {
                   title="Upload Image"
                 >
                   <IconPaperclip className="w-5 h-5" />
-                  <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    className="hidden" 
-                    accept="image/*" 
-                    onChange={handleFileSelect}
-                  />
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect}/>
                 </Button>
 
                 <Input
