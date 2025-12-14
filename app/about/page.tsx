@@ -186,7 +186,7 @@ export default function AboutPage() {
         <section className="bg-gradient-to-r from-green-600 to-green-700 rounded-lg shadow-md p-8 text-white">
           <h2 className="text-2xl font-bold mb-4">Project Goal</h2>
           <p className="leading-relaxed text-green-50">
-            To provide an accessible, automated tool for monitoring deforestation in Sumatra's forests, 
+            To provide an accessible, automated tool for monitoring deforestation in Sumatra&apos;s forests, 
             enabling researchers, conservationists, and policymakers to quickly assess forest health 
             and track changes over time. By leveraging AI and satellite imagery, we aim to support 
             timely intervention and forest conservation efforts.
