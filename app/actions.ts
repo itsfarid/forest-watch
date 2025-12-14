@@ -4,6 +4,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   display?: React.ReactNode;
+  imageUrl?: string; // Add this to store image for display
 }
 
 interface RoboflowResponse {
@@ -55,7 +56,7 @@ export async function analyzeForestImage(imageUrl: string) {
         };
     
     const response = await fetch(
-      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=70&overlap=30',
+      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=95&overlap=30',
       {
         method: 'POST',
         headers: {
@@ -156,6 +157,7 @@ export async function continueConversation(messages: Message[]) {
             {
               role: 'assistant' as const,
               content: responseContent,
+              imageUrl: imageUrl, // Pass the analyzed image URL
             },
           ],
         };
