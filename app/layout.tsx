@@ -8,6 +8,9 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Forest Watch AI",
   description: "Detect deforestation using AI",
+  icons: {
+    icon: '/logo.png', 
+  },
 };
 
 export default function RootLayout({
