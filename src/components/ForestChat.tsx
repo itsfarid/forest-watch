@@ -57,10 +57,7 @@ export default function ForestChat() {
       ...messages,
       { 
         role: 'user', 
-        content: selectedImage ? 'Analyzing uploaded image...' : input,
-        // Kita simpan preview user di properti yang sama (visualizedImage)
-        // atau kita render manual di bawah
-        visualizedImage: selectedImage || undefined 
+        content: selectedImage || input
       },
     ];
 
@@ -86,22 +83,31 @@ export default function ForestChat() {
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
         {messages.map((m, i) => (
           <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
-            <div className={`p-3 rounded-lg max-w-[85%] whitespace-pre-wrap ${
-              m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-800 shadow-sm'
-            }`}>
-              {m.content}
-            </div>
             
-            {/* LOGIKA RENDER GAMBAR SEKARANG ADA DI SINI (CLIENT SIDE) */}
-            {m.visualizedImage && (
-              <div className="mt-2 rounded-lg overflow-hidden border border-gray-200 bg-white p-1 max-w-xs sm:max-w-sm">
-                 {/* Cek apakah string sudah ada prefix data:image atau belum */}
-                 <img 
-                    src={m.visualizedImage.startsWith('data:') ? m.visualizedImage : `data:image/jpeg;base64,${m.visualizedImage}`} 
-                    alt="Visualized Result" 
-                    className="w-full h-auto rounded" 
-                 />
+            {/* Render text content */}
+            {m.role === 'assistant' && (
+              <div className="p-3 rounded-lg max-w-[85%] whitespace-pre-wrap bg-white border text-gray-800 shadow-sm">
+                {m.content}
               </div>
+            )}
+            
+            {/* User message - show image if base64, else show text */}
+            {m.role === 'user' && (
+              <>
+                {m.content.startsWith('data:image') ? (
+                  <div className="rounded-lg overflow-hidden border border-gray-200 bg-white p-1 max-w-xs sm:max-w-sm">
+                    <img 
+                      src={m.content} 
+                      alt="Uploaded" 
+                      className="w-full h-auto rounded" 
+                    />
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg max-w-[85%] whitespace-pre-wrap bg-blue-600 text-white">
+                    {m.content}
+                  </div>
+                )}
+              </>
             )}
 
           </div>
@@ -144,7 +150,7 @@ export default function ForestChat() {
             className="flex-1 p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={selectedImage ? "Ready to send image..." : "Paste image URL or drop file..."}
+            placeholder={selectedImage ? "Image selected, ready to analyze..." : "Paste image URL or drop file..."}
             disabled={!!selectedImage}
           />
 
@@ -153,7 +159,7 @@ export default function ForestChat() {
             disabled={isLoading || (!input && !selectedImage)}
             className="bg-green-600 text-white p-3 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {isLoading ? '...' : 'Send'}
+            {isLoading ? '...' : 'Analyze'}
           </button>
         </form>
       </div>
