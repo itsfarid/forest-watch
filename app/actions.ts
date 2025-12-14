@@ -56,7 +56,7 @@ export async function analyzeForestImage(imageUrl: string) {
         };
     
     const response = await fetch(
-      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=95&overlap=30',
+      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=85&overlap=30',
       {
         method: 'POST',
         headers: {
@@ -115,40 +115,29 @@ export async function continueConversation(messages: Message[]) {
         
         let responseContent = `🌲 Forest Analysis Results:\n\n`;
         
-        // Analyze based on detection count
+        // WORKAROUND: Use detection count with adjusted thresholds
+        // Since model over-detects, we classify based on relative severity
         if (detectionCount === 0) {
           responseContent += `✅ Deforestation Status: NOT DETECTED\n\n`;
           responseContent += `The analyzed area appears to be healthy forest with no deforestation indicators.`;
-        } else {
-          // Determine severity based on detection count
-          let severity = '';
-          let emoji = '';
-          
-          if (detectionCount < 50) {
-            severity = 'LOW';
-            emoji = '⚠️';
-          } else if (detectionCount < 100) {
-            severity = 'MEDIUM';
-            emoji = '🔶';
-          } else {
-            severity = 'HIGH';
-            emoji = '🔴';
-          }
-          
-          // Calculate rough percentage (assuming max detections ~200)
-          const percentage = Math.min((detectionCount / 200) * 100, 100).toFixed(1);
-          
-          responseContent += `${emoji} Deforestation Status: DETECTED (${severity} SEVERITY)\n\n`;
+        } else if (detectionCount < 120) {
+          // LOW severity: mostly forest with minimal clearing
+          responseContent += `✅ Deforestation Status: MINIMAL\n\n`;
+          responseContent += `📊 Minor disturbances detected: ${detectionCount} locations\n`;
+          responseContent += `📈 Forest coverage: High (~${(100 - (detectionCount / 200) * 100).toFixed(1)}%)\n\n`;
+          responseContent += `💡 Assessment: The area is predominantly healthy forest. Some natural gaps or minimal human activity detected, but overall forest integrity is maintained.`;
+        } else if (detectionCount < 140) {
+          // MEDIUM severity
+          responseContent += `🔶 Deforestation Status: MODERATE\n\n`;
           responseContent += `📊 Affected areas detected: ${detectionCount} locations\n`;
-          responseContent += `📈 Estimated deforestation coverage: ~${percentage}%\n\n`;
-          
-          if (detectionCount < 50) {
-            responseContent += `💡 Assessment: Minor deforestation detected. Early-stage clearing or selective logging may be present.`;
-          } else if (detectionCount < 100) {
-            responseContent += `💡 Assessment: Moderate deforestation detected. Significant forest clearing is occurring in this area.`;
-          } else {
-            responseContent += `💡 Assessment: Severe deforestation detected. Large-scale forest clearing is evident.`;
-          }
+          responseContent += `📈 Estimated deforestation coverage: ~${Math.min((detectionCount / 200) * 100, 100).toFixed(1)}%\n\n`;
+          responseContent += `💡 Assessment: Moderate deforestation detected. Significant forest clearing is occurring with scattered cleared patches throughout the area.`;
+        } else {
+          // HIGH severity
+          responseContent += `🔴 Deforestation Status: SEVERE\n\n`;
+          responseContent += `📊 Affected areas detected: ${detectionCount} locations\n`;
+          responseContent += `📈 Estimated deforestation coverage: ~${Math.min((detectionCount / 200) * 100, 100).toFixed(1)}%\n\n`;
+          responseContent += `💡 Assessment: Severe deforestation detected. Large-scale forest clearing is evident with major habitat loss and environmental impact.`;
         }
         
         return {
