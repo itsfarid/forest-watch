@@ -1,13 +1,11 @@
 'use server';
 
-// Interface Message tetap sama
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
   visualizedImage?: string;
 }
 
-// Interface RoboflowResponse tetap sama
 interface RoboflowResponse {
   outputs: Array<{
     output_image?: {
@@ -36,10 +34,7 @@ export async function analyzeForestImage(imageUrl: string) {
   try {
     console.log('Calling Roboflow with URL:', imageUrl);
     
-    // --- PERUBAHAN DI SINI ---
-    // Kita tambahkan query params:
-    // confidence=40 : Hanya deteksi jika yakin > 40% (Kurangi noise)
-    // overlap=30    : Gabungkan kotak yang tumpang tindih (NMS threshold)
+    // Konfigurasi API: confidence=40 (minimal yakin 40%), overlap=30 (gabungkan kotak yang tumpang tindih)
     const roboflowUrl = 'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=40&overlap=30';
     
     const response = await fetch(
@@ -62,7 +57,6 @@ export async function analyzeForestImage(imageUrl: string) {
     );
 
     const responseText = await response.text();
-    // console.log('Roboflow response:', responseText); // Uncomment jika ingin debug raw response
 
     if (!response.ok) {
       throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
@@ -95,7 +89,6 @@ export async function continueConversation(messages: Message[]) {
       
       let responseContent = `🌲 Forest Analysis Results:\n\n`;
       
-      // Tambahkan logika text sederhana
       if (detectionCount > 0) {
         responseContent += `⚠️ ALERT: Potential Deforestation Detected\n`;
         responseContent += `📊 Areas identified: ${detectionCount}\n\n`;
@@ -110,7 +103,6 @@ export async function continueConversation(messages: Message[]) {
             const totalConf = classItems.reduce((sum, p) => sum + p.confidence, 0);
             const avgConf = totalConf / count;
             
-            // Format confidence jadi persentase rapi
             responseContent += `• ${cls}: ${count} spots (avg ${(avgConf * 100).toFixed(0)}% confidence)\n`;
           });
         }
@@ -153,4 +145,14 @@ export async function continueConversation(messages: Message[]) {
   };
 }
 
-// ... checkAIAvailability tetap sama
+// INI YANG SEBELUMNYA HILANG:
+export async function checkAIAvailability() {
+  const hasApiKey = !!process.env.ROBOFLOW_API_KEY;
+   
+  return {
+    available: hasApiKey,
+    message: hasApiKey 
+      ? '🌲 Forest detection AI is ready' 
+      : '⚠️ Please configure ROBOFLOW_API_KEY in environment variables',
+  };
+}
