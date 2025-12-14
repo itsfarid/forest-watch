@@ -2,7 +2,7 @@ import * as React from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { buttonVariants } from '@/components/ui/button'
-import { IconSeparator, IconVercel } from '@/components/ui/icons'
+import { IconSeparator } from '@/components/ui/icons'
 import EnvCard from './cards/envcard'
 
 export async function Header() {
@@ -14,10 +14,10 @@ export async function Header() {
       </Link>
       <IconSeparator />
       <Link
-        href="/forestwatch"
+        href="/genui"
         className={cn(buttonVariants({ variant: 'link' }), "mr-auto font-normal")}
       >
-        <span className="hidden md:flex">Forest Watch</span>
+        <span className="hidden md:flex">Forest Watch AI</span>
       </Link>
     </header>
   )
