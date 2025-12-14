@@ -8,10 +8,11 @@ export interface Message {
 
 interface RoboflowResponse {
   outputs: Array<{
-    image?: {
-      value: string; 
+    output_image?: {
+      type: string;
+      value: string; // base64 image
     };
-    count?: number;
+    count_objects?: number;
     predictions?: Array<{
       class: string;
       confidence: number;
@@ -31,6 +32,8 @@ export async function analyzeForestImage(imageUrl: string) {
   }
 
   try {
+    console.log('Calling Roboflow with URL:', imageUrl);
+    
     const response = await fetch(
       'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4',
       {
@@ -47,11 +50,15 @@ export async function analyzeForestImage(imageUrl: string) {
       }
     );
 
+    const responseText = await response.text();
+    console.log('Roboflow response status:', response.status);
+    console.log('Roboflow response:', responseText);
+
     if (!response.ok) {
-      throw new Error(`Roboflow API error: ${response.statusText}`);
+      throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
     }
 
-    const result: RoboflowResponse = await response.json();
+    const result: RoboflowResponse = JSON.parse(responseText);
     return result;
   } catch (error) {
     console.error('Error calling Roboflow:', error);
@@ -72,9 +79,9 @@ export async function continueConversation(messages: Message[]) {
       
       // Extract analysis results
       const outputs = result.outputs || [];
-      const detectionCount = outputs.find(o => o.count !== undefined)?.count || 0;
+      const detectionCount = outputs.find(o => o.count_objects !== undefined)?.count_objects || 0;
       const predictions = outputs.find(o => o.predictions)?.predictions || [];
-      const visualizedImage = outputs.find(o => o.image)?.image?.value;
+      const visualizedImage = outputs.find(o => o.output_image)?.output_image?.value;
       
       let responseContent = `🌲 Forest Analysis Results:\n\n`;
       responseContent += `📊 Detections found: ${detectionCount}\n\n`;
