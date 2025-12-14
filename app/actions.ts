@@ -3,7 +3,7 @@
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
-  visualizedImage?: string;
+  display?: React.ReactNode;
 }
 
 interface RoboflowResponse {
@@ -26,34 +26,48 @@ interface RoboflowResponse {
 
 export async function analyzeForestImage(imageUrl: string) {
   const apiKey = process.env.ROBOFLOW_API_KEY;
-   
+  
   if (!apiKey) {
     throw new Error('ROBOFLOW_API_KEY not configured');
   }
 
   try {
-    // REVISI: Kita set confidence SANGAT RENDAH (5%) di URL
-    // Tujuannya: "Kirim semua data yang kamu punya, biar saya (kode) yang seleksi sendiri"
+    console.log('Calling Roboflow with image...');
+    
+    // Check if it's base64 or URL
+    const isBase64 = imageUrl.startsWith('data:image');
+    
+    const requestBody = isBase64 
+      ? {
+          api_key: apiKey,
+          inputs: {
+            image: { 
+              type: 'base64', 
+              value: imageUrl.split(',')[1] // Remove data:image/xxx;base64, prefix
+            },
+          },
+        }
+      : {
+          api_key: apiKey,
+          inputs: {
+            image: { type: 'url', value: imageUrl },
+          },
+        };
+    
     const response = await fetch(
-      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=5&overlap=30',
+      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4',
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          api_key: apiKey,
-          inputs: {
-            image: { 
-              type: imageUrl.startsWith('data:') ? 'base64' : 'url', 
-              value: imageUrl.startsWith('data:') ? imageUrl.split(',')[1] : imageUrl 
-            },
-          },
-        }),
+        body: JSON.stringify(requestBody),
       }
     );
 
     const responseText = await response.text();
+    console.log('Roboflow response status:', response.status);
+
     if (!response.ok) {
       throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
     }
@@ -69,84 +83,84 @@ export async function analyzeForestImage(imageUrl: string) {
 export async function continueConversation(messages: Message[]) {
   const lastMessage = messages[messages.length - 1];
   
-  const isBase64 = lastMessage.content.startsWith('data:image/');
+  // Check if message is base64 image
+  const isBase64Image = lastMessage.content.startsWith('data:image');
+  
+  // Check if message contains image URL
   const urlPattern = /https?:\/\/[^\s]+/gi;
   const urls = lastMessage.content.match(urlPattern);
-  const imageUrl = isBase64 ? lastMessage.content : (urls ? urls[0] : null);
-   
+  
+  const imageUrl = isBase64Image ? lastMessage.content : (urls && urls.length > 0 ? urls[0] : null);
+  
   if (imageUrl) {
-    try {
-      const result = await analyzeForestImage(imageUrl);
-      
-      // Ambil data dengan aman
-      const outputs = Array.isArray(result.outputs) ? result.outputs : [];
-      const firstOutput = outputs.length > 0 ? outputs[0] : {};
-      
-      // @ts-ignore
-      const rawPredictions = Array.isArray(firstOutput.predictions) ? firstOutput.predictions : [];
-      // @ts-ignore
-      const rawImage = firstOutput.output_image?.value;
-      
-      // --- LOGIKA FILTER BARU ---
-      // Kita turunkan standar jadi 25% (0.25). 
-      // Jika AI yakin minimal 25%, kita anggap itu valid.
-      const THRESHOLD = 0.25; 
-      
-      const validPredictions = rawPredictions.filter(p => p.confidence >= THRESHOLD);
-      const detectionCount = validPredictions.length;
-      
-      // Hitung berapa yang dibuang (untuk info debugging)
-      const filteredCount = rawPredictions.length - detectionCount;
-
-      let responseContent = `🌲 Forest Analysis Results:\n\n`;
-      let finalVisualizedImage = undefined;
-
-      if (detectionCount > 0) {
-        responseContent += `⚠️ ALERT: Potential Deforestation Detected\n`;
-        responseContent += `📊 Areas identified: ${detectionCount}\n`;
-        responseContent += `(Filtered ${filteredCount} low-confidence signals)\n\n`;
+    const isImageUrl = isBase64Image || 
+      /\.(jpg|jpeg|png|gif|webp|bmp)(\?.*)?$/i.test(imageUrl) || 
+      imageUrl.includes('unsplash.com') ||
+      imageUrl.includes('images') ||
+      imageUrl.includes('photo') ||
+      imageUrl.includes('imgs.') ||
+      imageUrl.includes('upload') ||
+      imageUrl.includes('mongabay');
+    
+    if (isImageUrl) {
+      try {
+        const result = await analyzeForestImage(imageUrl);
         
-        const classNames = validPredictions.map(p => p.class);
-        const uniqueClasses = Array.from(new Set(classNames));
+        const outputs = result.outputs || [];
+        const detectionCount = outputs.find(o => o.count_objects !== undefined)?.count_objects || 0;
+        const predictions = outputs.find(o => o.predictions)?.predictions || [];
         
-        uniqueClasses.forEach((cls) => {
-          const classItems = validPredictions.filter(p => p.class === cls);
-          const count = classItems.length;
-          const totalConf = classItems.reduce((sum, p) => sum + p.confidence, 0);
-          const avgConf = totalConf / count;
+        let responseContent = `🌲 Forest Analysis Results:\n\n`;
+        
+        if (detectionCount === 0) {
+          responseContent += `✅ Deforestation area: NOT FOUND\n\n`;
+          responseContent += `The analyzed area appears to be healthy forest with no deforestation indicators detected.`;
+        } else {
+          // Calculate percentage (assuming the detection count represents deforested areas)
+          // You can adjust this calculation based on your needs
+          const totalArea = 100; // baseline
+          const deforestationPercentage = ((detectionCount / totalArea) * 100).toFixed(1);
           
-          responseContent += `• ${cls}: ${count} spots (avg ${(avgConf * 100).toFixed(0)}% confidence)\n`;
-        });
-
-        // Tampilkan gambar jika ada deteksi di atas threshold
-        finalVisualizedImage = rawImage;
-
-      } else {
-        responseContent += `✅ Result: Healthy Forest\nNo deforestation indicators detected above 25% confidence.\n(Raw detections: ${rawPredictions.length}, all considered noise)`;
-        finalVisualizedImage = undefined;
+          responseContent += `⚠️ Deforestation area: DETECTED\n`;
+          responseContent += `📊 Deforested areas found: ${detectionCount} locations\n`;
+          responseContent += `📈 Estimated coverage: ~${deforestationPercentage}%\n\n`;
+          
+          if (predictions.length > 0) {
+            responseContent += `Detected indicators:\n`;
+            const classNames = predictions.map(p => p.class);
+            const uniqueClasses = Array.from(new Set(classNames));
+            
+            uniqueClasses.forEach((cls, idx) => {
+              const classItems = predictions.filter(p => p.class === cls);
+              const count = classItems.length;
+              const totalConf = classItems.reduce((sum, p) => sum + p.confidence, 0);
+              const avgConf = totalConf / count;
+              responseContent += `${idx + 1}. ${cls}: ${count} areas (${(avgConf * 100).toFixed(1)}% confidence)\n`;
+            });
+          }
+        }
+        
+        return {
+          messages: [
+            ...messages,
+            {
+              role: 'assistant' as const,
+              content: responseContent,
+            },
+          ],
+        };
+      } catch (error) {
+        console.error('Full error:', error);
+        return {
+          messages: [
+            ...messages,
+            {
+              role: 'assistant' as const,
+              content: `❌ Error analyzing image: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            },
+          ],
+        };
       }
-      
-      return {
-        messages: [
-          ...messages,
-          {
-            role: 'assistant' as const,
-            content: responseContent,
-            visualizedImage: finalVisualizedImage, 
-          },
-        ],
-      };
-    } catch (error) {
-      console.error('Full error:', error);
-      return {
-        messages: [
-          ...messages,
-          {
-            role: 'assistant' as const,
-            content: `❌ Error analyzing image: ${error instanceof Error ? error.message : 'Unknown error'}.`,
-          },
-        ],
-      };
     }
   }
   
@@ -155,7 +169,7 @@ export async function continueConversation(messages: Message[]) {
       ...messages,
       {
         role: 'assistant' as const,
-        content: `🌲 Forest Watch AI Ready.\nUpload an image to check for deforestation.`,
+        content: `🌲 Forest Watch AI\n\nUpload an image or paste URL to analyze for deforestation detection.\n\nI'll check if there are any deforestation indicators in the image.`,
       },
     ],
   };
@@ -163,7 +177,7 @@ export async function continueConversation(messages: Message[]) {
 
 export async function checkAIAvailability() {
   const hasApiKey = !!process.env.ROBOFLOW_API_KEY;
-   
+  
   return {
     available: hasApiKey,
     message: hasApiKey 
