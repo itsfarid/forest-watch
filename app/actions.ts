@@ -32,10 +32,7 @@ export async function analyzeForestImage(imageUrl: string) {
   }
 
   try {
-    console.log('Calling Roboflow with URL:', imageUrl);
-    
-    // URL tetap sama, tapi kita tidak berharap banyak pada query params ini
-    // karena workflow sering mengabaikannya. Kita akan filter manual di bawah.
+    // Kita gunakan workflow yang sama
     const response = await fetch(
       'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=60&overlap=30',
       {
@@ -58,6 +55,7 @@ export async function analyzeForestImage(imageUrl: string) {
     const responseText = await response.text();
 
     if (!response.ok) {
+      // Cek apakah error karena gambar terlalu besar atau server error
       throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
     }
 
@@ -81,13 +79,25 @@ export async function continueConversation(messages: Message[]) {
     try {
       const result = await analyzeForestImage(imageUrl);
       
-      const outputs = result.outputs || [];
-      const rawPredictions = outputs.find(o => o.predictions)?.predictions || [];
-      const rawImage = outputs.find(o => o.output_image)?.output_image?.value;
+      // --- PERBAIKAN: EKSTRAKSI YANG LEBIH AMAN (DEFENSIVE) ---
       
-      // --- LOGIKA FILTERING MANUAL DI SINI ---
-      // Kita hanya ambil prediksi yang confidence-nya > 0.6 (60%)
-      const THRESHOLD = 0.6; 
+      // 1. Pastikan outputs ada dan merupakan array
+      const outputs = Array.isArray(result.outputs) ? result.outputs : [];
+      
+      // 2. Ambil output pertama (jika ada)
+      const firstOutput = outputs.length > 0 ? outputs[0] : {};
+      
+      // 3. Ambil predictions, dan PAKSA menjadi array jika null/undefined
+      //    (Menghindari error "filter is not a function")
+      //    @ts-ignore (untuk menghandle kasus dimana API mengembalikan null tapi tipe kita Array)
+      const rawPredictions = Array.isArray(firstOutput.predictions) ? firstOutput.predictions : [];
+      
+      // 4. Ambil gambar
+      // @ts-ignore
+      const rawImage = firstOutput.output_image?.value;
+      
+      // --- FILTERING ---
+      const THRESHOLD = 0.6; // 60% confidence
       const validPredictions = rawPredictions.filter(p => p.confidence >= THRESHOLD);
       const detectionCount = validPredictions.length;
 
@@ -95,7 +105,6 @@ export async function continueConversation(messages: Message[]) {
       let finalVisualizedImage = undefined;
 
       if (detectionCount > 0) {
-        // Jika setelah difilter masih ada deteksi, berarti BENAR ada deforestasi
         responseContent += `⚠️ ALERT: Potential Deforestation Detected\n`;
         responseContent += `📊 Areas identified: ${detectionCount} (High Confidence)\n\n`;
         
@@ -111,16 +120,10 @@ export async function continueConversation(messages: Message[]) {
           responseContent += `• ${cls}: ${count} spots (avg ${(avgConf * 100).toFixed(0)}% confidence)\n`;
         });
 
-        // Tampilkan gambar hasil (walaupun mungkin agak berantakan, tapi datanya valid)
         finalVisualizedImage = rawImage;
-
       } else {
-        // Jika setelah difilter hasilnya 0 (padahal API mungkin kirim 100+ sampah)
-        // Kita nyatakan BERSIH.
+        // Jika 0 deteksi valid
         responseContent += `✅ Result: Healthy Forest\nNo deforestation indicators detected.\n(Filtered ${rawPredictions.length} low-confidence noise signals)`;
-        
-        // PENTING: Jangan tampilkan visualizedImage dari server karena isinya kotak-kotak sampah.
-        // Biarkan undefined, jadi UI hanya menampilkan teks "Healthy Forest".
         finalVisualizedImage = undefined;
       }
       
