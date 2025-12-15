@@ -1,204 +1,251 @@
-export default function AboutPage() {
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-green-50 to-white py-12 px-4">
-      <div className="max-w-4xl mx-auto">
-        
-        {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            🌲 About Forest Watch
-          </h1>
-          <p className="text-xl text-gray-600">
-            AI-Powered Deforestation Detection System for Sumatra
-          </p>
-        </div>
+'use client';
 
-        {/* Project Overview */}
-        <section className="bg-white rounded-lg shadow-md p-8 mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">Project Overview</h2>
-          <p className="text-gray-700 leading-relaxed mb-4">
-            Forest Watch is an AI-powered system designed to automatically detect deforestation 
-            in Sumatra using satellite imagery. The system analyzes aerial photographs from 
-            Google Earth Pro to identify active deforestation areas, helping monitor forest 
-            conservation efforts.
-          </p>
-          <p className="text-gray-700 leading-relaxed">
-            This project focuses on <strong>active deforestation</strong> detection - areas where 
-            forest clearing is visibly ongoing, characterized by brown, gray, or yellowish coloring, 
-            lack of green vegetation, and visible logging activity.
-          </p>
-        </section>
+import { useState, useRef } from 'react';
+import { continueConversation, Message } from '@/app/actions';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { IconArrowUp } from '@/components/ui/icons';
 
-        {/* Dataset Collection */}
-        <section className="bg-white rounded-lg shadow-md p-8 mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">Dataset Collection Process</h2>
+const IconPaperclip = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </svg>
+);
+
+const IconTree = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 10a6 6 0 0 0-6 6h12a6 6 0 0 0-6-6Z"/><path d="M12 2a8 8 0 0 0-8 8v12h16V10a8 8 0 0 0-8-8Z"/><path d="M12 14v8"/>
+  </svg>
+);
+
+export const maxDuration = 60;
+
+export default function Home() {
+  const [conversation, setConversation] = useState<Message[]>([]);
+  const [input, setInput] = useState<string>('');
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 800;
+          const scaleSize = MAX_WIDTH / img.width;
+          const width = MAX_WIDTH;
+          const height = img.height * scaleSize;
+
+          canvas.width = width;
+          canvas.height = height;
           
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-lg font-semibold text-green-700 mb-2">Data Source</h3>
-              <p className="text-gray-700">
-                Satellite imagery captured from <strong>Google Earth Pro</strong> across 
-                multiple regions in Sumatra, Indonesia.
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(compressedBase64);
+        };
+      };
+    });
+  };
+
+  const processFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload an image file');
+      return;
+    }
+    try {
+      const compressedData = await compressImage(file);
+      setSelectedImage(compressedData);
+    } catch (e) {
+      console.error("Failed to process image", e);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) processFile(file);
+  };
+
+  const handleSubmit = async () => {
+    const contentToSend = selectedImage || input;
+    if (!contentToSend.trim()) return;
+
+    setIsLoading(true);
+
+    const newUserMessage: Message = {
+      role: 'user',
+      content: selectedImage || input
+    };
+
+    setInput("");
+    setSelectedImage(null);
+
+    const newHistory = [...conversation, newUserMessage];
+    setConversation(newHistory);
+
+    try {
+      const { messages } = await continueConversation(newHistory);
+      setConversation(messages);
+    } catch (error) {
+      console.error("Error submitting:", error);
+      setConversation([
+        ...newHistory,
+        { role: 'assistant', content: "❌ Failed to analyze image. Please check API Key or try another image." }
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSubmit();
+    }
+  };
+
+  return (
+    <div className="relative flex h-[calc(100vh_-_theme(spacing.16))] overflow-hidden pb-10 flex-col">
+      <div className="group w-full overflow-auto">
+        <div className="max-w-xl mx-auto mt-10 mb-32 px-4">
+          
+          {conversation.length <= 0 && (
+            <div className="flex flex-col items-center justify-center h-[50vh] text-center space-y-4">
+              <div className="p-4 bg-green-100 rounded-full text-green-600">
+                <IconTree className="w-12 h-12" />
+              </div>
+              <h1 className="text-2xl font-bold text-gray-800">🌲 Forest Watch AI</h1>
+              <p className="text-gray-500 max-w-sm">
+                Upload forest photos or satellite imagery to automatically detect potential deforestation.
               </p>
             </div>
+          )}
 
-            <div>
-              <h3 className="text-lg font-semibold text-green-700 mb-2">Target Regions</h3>
-              <ul className="list-disc list-inside text-gray-700 space-y-1">
-                <li>Tapanuli Selatan: 25 samples</li>
-                <li>Aceh Tamiang: 57 samples</li>
-                <li>Agam: 28 samples</li>
-                <li>Close-up imagery: 15 samples (100-300m altitude)</li>
-              </ul>
+          {conversation.map((message, index) => (
+            <div key={index} className="whitespace-pre-wrap flex mb-5">
+              <div className={`${message.role === 'user' ? 'bg-slate-200 ml-auto' : 'bg-transparent w-full'} p-3 rounded-lg max-w-[85%]`}>
+                
+                {message.role === 'assistant' && (
+                  <>
+                    {message.imageUrl && (
+                      <div className="mb-3 rounded-md overflow-hidden border border-gray-300">
+                        <img 
+                          src={message.imageUrl} 
+                          alt="Analyzed" 
+                          className="w-full h-auto object-contain max-h-60" 
+                        />
+                      </div>
+                    )}
+                    <div>{message.content}</div>
+                  </>
+                )}
+                
+                {message.role === 'user' && !message.content.startsWith('data:image') && (
+                  <div>{message.content}</div>
+                )}
+                
+                {message.role === 'user' && message.content.startsWith('data:image') && (
+                  <div className="rounded-md overflow-hidden border border-gray-300">
+                    <img 
+                      src={message.content} 
+                      alt="Uploaded" 
+                      className="w-full h-auto object-contain max-h-60" 
+                    />
+                  </div>
+                )}
+
+              </div>
             </div>
-
-            <div>
-              <h3 className="text-lg font-semibold text-green-700 mb-2">Technical Standards</h3>
-              <ul className="list-disc list-inside text-gray-700 space-y-1">
-                <li>Camera altitude: 1000m - 2000m</li>
-                <li>Top-down view (perpendicular to ground)</li>
-                <li>North-oriented imagery</li>
-                <li>Maximum resolution JPEG format</li>
-                <li>High terrain quality settings</li>
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        {/* Data Statistics */}
-        <section className="bg-white rounded-lg shadow-md p-8 mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">Dataset Statistics</h2>
+          ))}
           
-          <div className="grid md:grid-cols-3 gap-6">
-            <div className="text-center p-6 bg-blue-50 rounded-lg">
-              <div className="text-4xl font-bold text-blue-600 mb-2">132</div>
-              <div className="text-gray-700">Initial Images Collected</div>
+          {isLoading && (
+            <div className="flex mb-5">
+               <div className="bg-transparent w-full p-3 text-gray-500 italic animate-pulse">
+                 🤖 Analyzing forest data...
+               </div>
             </div>
-            
-            <div className="text-center p-6 bg-yellow-50 rounded-lg">
-              <div className="text-4xl font-bold text-yellow-600 mb-2">122</div>
-              <div className="text-gray-700">Images After Filtering</div>
-            </div>
-            
-            <div className="text-center p-6 bg-green-50 rounded-lg">
-              <div className="text-4xl font-bold text-green-600 mb-2">61</div>
-              <div className="text-gray-700">Annotated Datasets</div>
-            </div>
-          </div>
-
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <h3 className="font-semibold text-gray-900 mb-2">Filtering Criteria</h3>
-            <p className="text-gray-700 text-sm">
-              Images removed due to: cloud coverage, blur, inconsistent lighting/lines, 
-              and duplicate samples to ensure dataset quality.
-            </p>
-          </div>
-        </section>
-
-        {/* Detection Criteria */}
-        <section className="bg-white rounded-lg shadow-md p-8 mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">Deforestation Detection Criteria</h2>
-          
-          <div className="space-y-4">
-            <div className="flex items-start">
-              <span className="text-2xl mr-3">🟤</span>
-              <div>
-                <h3 className="font-semibold text-gray-900">Color Indicators</h3>
-                <p className="text-gray-700">Brown, gray, or yellowish areas lacking green vegetation</p>
-              </div>
-            </div>
-
-            <div className="flex items-start">
-              <span className="text-2xl mr-3">📐</span>
-              <div>
-                <h3 className="font-semibold text-gray-900">Geometric Patterns</h3>
-                <p className="text-gray-700">Open areas with geometric clearing patterns</p>
-              </div>
-            </div>
-
-            <div className="flex items-start">
-              <span className="text-2xl mr-3">🪵</span>
-              <div>
-                <h3 className="font-semibold text-gray-900">Logging Evidence</h3>
-                <p className="text-gray-700">Visible logging activity, cut wood, and cleared pathways</p>
-              </div>
-            </div>
-
-            <div className="flex items-start">
-              <span className="text-2xl mr-3">🌲</span>
-              <div>
-                <h3 className="font-semibold text-gray-900">Forest Context</h3>
-                <p className="text-gray-700">Located within or surrounded by forested areas</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <p className="text-sm text-amber-900">
-              <strong>Note:</strong> Palm oil plantations, mining areas, rice paddies, and residential zones 
-              are excluded from deforestation classification in this project, focusing specifically on 
-              active forest clearing.
-            </p>
-          </div>
-        </section>
-
-        {/* Technology Stack */}
-        <section className="bg-white rounded-lg shadow-md p-8 mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">Technology Stack</h2>
-          
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-3">Data Collection</h3>
-              <ul className="space-y-2 text-gray-700">
-                <li>• Google Earth Pro</li>
-                <li>• Manual annotation and filtering</li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-3">AI & Training</h3>
-              <ul className="space-y-2 text-gray-700">
-                <li>• Roboflow (model training & deployment)</li>
-                <li>• Object detection workflow</li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-3">Web Application</h3>
-              <ul className="space-y-2 text-gray-700">
-                <li>• Next.js 14 (App Router)</li>
-                <li>• React Server Components</li>
-                <li>• Tailwind CSS</li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-3">Deployment</h3>
-              <ul className="space-y-2 text-gray-700">
-                <li>• Vercel (hosting & CI/CD)</li>
-                <li>• Roboflow Serverless API</li>
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        {/* Project Goal */}
-        <section className="bg-gradient-to-r from-green-600 to-green-700 rounded-lg shadow-md p-8 text-white">
-          <h2 className="text-2xl font-bold mb-4">Project Goal</h2>
-          <p className="leading-relaxed text-green-50">
-            To provide an accessible, automated tool for monitoring deforestation in Sumatra&apos;s forests, 
-            enabling researchers, conservationists, and policymakers to quickly assess forest health 
-            and track changes over time. By leveraging AI and satellite imagery, we aim to support 
-            timely intervention and forest conservation efforts.
-          </p>
-        </section>
-
-        {/* Footer */}
-        <div className="text-center mt-12 text-gray-600">
-          <p>Developed as part of forest conservation research initiative</p>
-          <p className="text-sm mt-2">Data collected from Sumatra, Indonesia • 2024-2025</p>
+          )}
         </div>
 
+        <div className="fixed inset-x-0 bottom-10 w-full z-10 px-4">
+          <div className="w-full max-w-xl mx-auto">
+            {selectedImage && (
+              <div className="mb-2 relative w-fit animate-in fade-in slide-in-from-bottom-2">
+                <div className="relative rounded-lg overflow-hidden border border-slate-300 shadow-md">
+                  <img src={selectedImage} alt="Preview" className="h-20 w-auto object-cover bg-white" />
+                </div>
+                <button 
+                  onClick={() => setSelectedImage(null)}
+                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 shadow-sm transition-colors"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+            )}
+
+            <Card 
+              className={`p-2 transition-colors duration-200 ${isDragging ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' : ''}`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 text-slate-500 hover:text-slate-700"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Upload Image"
+                >
+                  <IconPaperclip className="w-5 h-5" />
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect}/>
+                </Button>
+
+                <Input
+                  type="text"
+                  value={input}
+                  onKeyDown={handleKeyDown}
+                  onChange={event => setInput(event.target.value)}
+                  className="flex-1 border-0 shadow-none focus-visible:ring-0 px-2"
+                  placeholder={selectedImage ? "Image selected, click send to analyze..." : "Paste image URL or upload..."}
+                  disabled={isLoading || !!selectedImage}
+                />
+                
+                <Button
+                  onClick={handleSubmit}
+                  disabled={isLoading || (!input.trim() && !selectedImage)}
+                  className="shrink-0"
+                >
+                  {isLoading ? <div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent" /> : <IconArrowUp />}
+                </Button> 
+              </div>
+            </Card>
+          </div>
+        </div>
       </div>
     </div>
   );
