@@ -19,7 +19,7 @@ const openai = new OpenAI({
 });
 
 /* =========================
-   Check AI Availability (exported again because UI imports it)
+   Check AI Availability (exported because UI imports it)
    ========================= */
 export async function checkAIAvailability(): Promise<{
   available: boolean;
@@ -41,63 +41,203 @@ export async function checkAIAvailability(): Promise<{
 }
 
 /* =========================
-   Roboflow settings (set di env)
-   - ROBOFLOW_API_KEY: kunci API Roboflow
-   - ROBOFLOW_MODEL_ID: model id / model path seperti "students-eyecp/deforestation-detection-ivd96-instant-4"
-   - (optional) ROBOFLOW_INFERENCE_URL: full inference endpoint jika ingin override
+   Roboflow settings (env)
+   - ROBOFLOW_API_KEY
+   - ROBOFLOW_MODEL_ID (e.g. students-eyecp/deforestation-detection-ivd96-instant-4)
+   - optional: ROBOFLOW_INFERENCE_URL (full inference URL)
+   - optional: ROBOFLOW_DETECT_MODEL (detect.roboflow.com slug if different)
+   - optional: ROBOFLOW_DEBUG=true to return raw preview to UI when no preds (temporary)
    ========================= */
 const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY;
 const ROBOFLOW_MODEL_ID = process.env.ROBOFLOW_MODEL_ID;
 const ROBOFLOW_INFERENCE_URL = process.env.ROBOFLOW_INFERENCE_URL;
+const ROBOFLOW_DETECT_MODEL = process.env.ROBOFLOW_DETECT_MODEL || ROBOFLOW_MODEL_ID;
+const ROBOFLOW_DEBUG = process.env.ROBOFLOW_DEBUG === 'true';
 
 /* =========================
-   Helper utilities
+   Helpers
    ========================= */
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 function roboflowSafeCheck() {
-  return Boolean(ROBOFLOW_API_KEY && (ROBOFLOW_MODEL_ID || ROBOFLOW_INFERENCE_URL));
+  return Boolean(
+    ROBOFLOW_API_KEY &&
+      (ROBOFLOW_MODEL_ID || ROBOFLOW_INFERENCE_URL || ROBOFLOW_DETECT_MODEL)
+  );
+}
+
+/**
+ * Encode each segment of a path but preserve slashes.
+ * Example: 'owner/project/model-version' => 'owner/project/model-version' with each segment URI-encoded.
+ */
+function safeModelPath(id: string) {
+  return id
+    .split('/')
+    .map((seg) => encodeURIComponent(seg))
+    .join('/');
+}
+
+function extractPredictionsFromResponse(rfResponse: any): any[] {
+  if (!rfResponse) return [];
+  if (Array.isArray(rfResponse.predictions)) return rfResponse.predictions;
+  if (Array.isArray(rfResponse?.outputs?.[0]?.predictions)) return rfResponse.outputs[0].predictions;
+  if (Array.isArray(rfResponse?.results?.[0]?.predictions)) return rfResponse.results[0].predictions;
+  if (Array.isArray(rfResponse?.data?.predictions)) return rfResponse.data.predictions;
+  // Some Roboflow Instant responses may nest predictions in other ways; attempt to find any array named predictions
+  const findPreds = (obj: any): any[] | null => {
+    if (!obj || typeof obj !== 'object') return null;
+    if (Array.isArray(obj.predictions)) return obj.predictions;
+    for (const k of Object.keys(obj)) {
+      const val = obj[k];
+      if (val && typeof val === 'object') {
+        const nested = findPreds(val);
+        if (nested) return nested;
+      }
+    }
+    return null;
+  };
+  const nested = findPreds(rfResponse);
+  return Array.isArray(nested) ? nested : [];
+}
+
+function annotatedImageFromResponse(rfResponse: any): string | null {
+  return rfResponse?.image ?? rfResponse?.annotated ?? rfResponse?.output_image ?? rfResponse?.annotated_image ?? null;
+}
+
+/* =========================
+   Convert dataURL -> Buffer & mime
+   More tolerant regex to allow extra attributes before ;base64
+   ========================= */
+function dataUrlToBuffer(dataUrl: string) {
+  const match = dataUrl.match(/^data:([^;]+);.*base64,(.+)$/);
+  if (!match) throw new Error('Invalid data URL');
+  const mime = match[1];
+  const base64 = match[2];
+  const buffer = Buffer.from(base64, 'base64');
+  return { buffer, mime };
 }
 
 /* =========================
    Analyze image with Roboflow
+   - Try JSON dataURI endpoint first (api.roboflow.com or ROBOFLOW_INFERENCE_URL)
+   - If no predictions returned, fallback to detect.roboflow.com multipart/form-data
+   - Logs status for debugging
    ========================= */
 async function analyzeImageWithRoboflow(base64DataUrl: string) {
   if (!roboflowSafeCheck()) {
     throw new Error('Roboflow environment variables not configured.');
   }
 
-  // use non-null assertion because we already checked presence above
-  const baseUrl = ROBOFLOW_INFERENCE_URL
+  // Build JSON inference URL safely (only use encode for path segments)
+  const jsonUrl = ROBOFLOW_INFERENCE_URL
     ? ROBOFLOW_INFERENCE_URL
-    : `https://api.roboflow.com/${encodeURIComponent(ROBOFLOW_MODEL_ID!)} /infer?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`.replace(
-        ' /infer',
+    : `https://api.roboflow.com/${safeModelPath(ROBOFLOW_MODEL_ID!)}?/infer?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`.replace(
+        '?/infer',
         '/infer'
-      );
+      ); // defensive: ensure single slash
 
-  // Roboflow Instant / most infer endpoints accept JSON { image: "<dataURI or url>" }
-  const res = await fetch(baseUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      image: base64DataUrl,
-    }),
-  });
+  // Attempt 1: JSON dataURI POST
+  try {
+    const resp = await fetch(jsonUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64DataUrl }),
+    });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    const err: any = new Error(`Roboflow inference failed ${res.status} ${res.statusText}: ${text}`);
-    err.status = res.status;
-    err.body = text;
-    throw err;
+    let json: any = null;
+    const contentType = resp.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      try {
+        json = await resp.json();
+      } catch (e) {
+        json = null;
+      }
+    } else {
+      // Some error responses are plain text or HTML — capture for debugging
+      const text = await resp.text();
+      console.log('[Roboflow] JSON attempt non-json response (status):', resp.status, 'body-snippet:', text.slice(0, 2000));
+    }
+
+    console.log('[Roboflow] JSON attempt status:', resp.status, 'jsonKeys:', json ? Object.keys(json) : 'no-json');
+
+    const preds = extractPredictionsFromResponse(json);
+    if (Array.isArray(preds) && preds.length > 0) {
+      // include raw response for debugging if requested
+      if (ROBOFLOW_DEBUG) {
+        console.log('[Roboflow] JSON response preview:', JSON.stringify(json).slice(0, 4000));
+      }
+      return json;
+    }
+
+    console.log('[Roboflow] JSON-response had no predictions, will try multipart fallback...');
+    // continue to multipart fallback
+  } catch (err) {
+    console.error('[Roboflow] JSON attempt failed:', err);
   }
 
-  const json = await res.json();
-  return json;
+  // Attempt 2: multipart/form-data to detect.roboflow.com/<MODEL_SLUG>
+  const DETECT_MODEL = ROBOFLOW_DETECT_MODEL;
+  if (!DETECT_MODEL) {
+    throw new Error('Roboflow detect model not configured (ROBOFLOW_DETECT_MODEL or ROBOFLOW_MODEL_ID missing).');
+  }
+
+  try {
+    const { buffer, mime } = dataUrlToBuffer(base64DataUrl);
+
+    // Build FormData. Modern Node (18+) / undici exposes global FormData & Blob.
+    const form = new FormData();
+    try {
+      // Try Blob first (web-compatible)
+      // @ts-ignore
+      const blob = typeof Blob !== 'undefined' ? new Blob([buffer], { type: mime }) : null;
+      if (blob) {
+        // @ts-ignore
+        form.append('file', blob, 'upload.jpg');
+      } else {
+        // fallback: append buffer (some runtimes accept Buffer in FormData append)
+        // @ts-ignore
+        form.append('file', buffer, { filename: 'upload.jpg', contentType: mime });
+      }
+    } catch (e) {
+      // fallback: append Buffer with options (some runtimes accept it)
+      // @ts-ignore
+      form.append('file', buffer, { filename: 'upload.jpg', contentType: mime });
+    }
+
+    const detectUrl = `https://detect.roboflow.com/${safeModelPath(DETECT_MODEL)}?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`;
+
+    const r2 = await fetch(detectUrl, {
+      method: 'POST',
+      body: form as any,
+      // DO NOT set Content-Type, boundary will be set automatically
+    });
+
+    let json2: any = null;
+    const ct2 = r2.headers.get('content-type') ?? '';
+    if (ct2.includes('application/json')) {
+      try {
+        json2 = await r2.json();
+      } catch (e) {
+        console.error('[Roboflow] multipart returned invalid json:', e);
+      }
+    } else {
+      const text = await r2.text();
+      console.log('[Roboflow] multipart non-json response (status):', r2.status, 'body-snippet:', text.slice(0, 2000));
+    }
+
+    console.log('[Roboflow] multipart attempt status:', r2.status, 'jsonKeys:', json2 ? Object.keys(json2) : 'no-json');
+
+    if (ROBOFLOW_DEBUG && json2) {
+      console.log('[Roboflow] multipart response preview:', JSON.stringify(json2).slice(0, 4000));
+    }
+
+    return json2;
+  } catch (err) {
+    console.error('[Roboflow] multipart fallback failed:', err);
+    throw err;
+  }
 }
 
 /* =========================
@@ -119,9 +259,8 @@ export async function continueConversation(
     try {
       const rfResponse = await analyzeImageWithRoboflow(last.content);
 
-      const predictions: Array<{ confidence?: number; class?: string }> = Array.isArray(rfResponse.predictions)
-        ? rfResponse.predictions
-        : [];
+      // Robust extraction of predictions
+      const predictions: Array<{ confidence?: number; class?: string }> = extractPredictionsFromResponse(rfResponse);
 
       const total = predictions.length;
       const avgConf = total > 0 ? predictions.reduce((s, p) => s + (p.confidence ?? 0), 0) / total : 0;
@@ -135,8 +274,17 @@ export async function continueConversation(
           confidence: (p.confidence ?? 0) * 100,
         }));
 
-      // Roboflow may return an annotated image URL under different keys
-      const annotatedImageUrl = rfResponse.image ?? rfResponse.annotated ?? rfResponse.output_image ?? null;
+      const annotatedImageUrl = annotatedImageFromResponse(rfResponse);
+
+      // If no predictions and debug enabled, return preview to UI for troubleshooting
+      if ((!predictions || predictions.length === 0) && ROBOFLOW_DEBUG) {
+        const raw = typeof rfResponse === 'string' ? rfResponse : JSON.stringify(rfResponse, null, 2);
+        const assistantMessage: Message = {
+          role: 'assistant',
+          content: `🔎 Roboflow response (debug):\n\n${raw.slice(0, 3000)}\n\n(End preview)`,
+        };
+        return { messages: [...messages, assistantMessage] };
+      }
 
       const assistantContentLines: string[] = [
         `✅ Image analyzed with Roboflow model (${ROBOFLOW_MODEL_ID ?? 'roboflow model'}).`,
