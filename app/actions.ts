@@ -26,43 +26,58 @@ export async function analyzeForestImage(imageUrl: string) {
   }
 
   try {
-    console.log('Calling Roboflow Direct Model API...');
+    console.log('Calling Roboflow Instant Model API...');
     
     const isBase64 = imageUrl.startsWith('data:image');
     
+    // For Roboflow Instant, use GET with image parameter
+    const modelUrl = `https://detect.roboflow.com/students-eyecp/deforestation-detection-ivd96-instant/4`;
+    
     let apiUrl: string;
-    let requestBody: string | null;
-    let headers: Record<string, string>;
     
     if (isBase64) {
-      // Base64 upload
-      apiUrl = `https://detect.roboflow.com/students-eyecp/deforestation-detection-ivd96-instant/4?api_key=${apiKey}&confidence=95`;
-      requestBody = imageUrl.split(',')[1];
-      headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+      // Base64: POST to upload endpoint
+      apiUrl = `${modelUrl}?api_key=${apiKey}&confidence=95`;
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: imageUrl.split(',')[1],
+      });
+
+      const responseText = await response.text();
+      console.log('API Response Status:', response.status);
+
+      if (!response.ok) {
+        throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
+      }
+
+      const result: RoboflowResponse = JSON.parse(responseText);
+      console.log('Predictions count:', result.predictions?.length || 0);
+      
+      return result;
     } else {
-      // URL-based inference
-      apiUrl = `https://detect.roboflow.com/students-eyecp/deforestation-detection-ivd96-instant/4?api_key=${apiKey}&confidence=95&image=${encodeURIComponent(imageUrl)}`;
-      requestBody = null;
-      headers = { 'Content-Type': 'application/json' };
+      // URL: Use GET request
+      apiUrl = `${modelUrl}?api_key=${apiKey}&confidence=95&image=${encodeURIComponent(imageUrl)}`;
+      
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+      });
+
+      const responseText = await response.text();
+      console.log('API Response Status:', response.status);
+
+      if (!response.ok) {
+        throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
+      }
+
+      const result: RoboflowResponse = JSON.parse(responseText);
+      console.log('Predictions count:', result.predictions?.length || 0);
+      
+      return result;
     }
-    
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers,
-      body: requestBody,
-    });
-
-    const responseText = await response.text();
-    console.log('API Response Status:', response.status);
-
-    if (!response.ok) {
-      throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
-    }
-
-    const result: RoboflowResponse = JSON.parse(responseText);
-    console.log('Predictions count:', result.predictions?.length || 0);
-    
-    return result;
   } catch (error) {
     console.error('Error calling Roboflow:', error);
     throw error;
