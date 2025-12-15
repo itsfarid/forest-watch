@@ -56,7 +56,7 @@ export async function analyzeForestImage(imageUrl: string) {
         };
     
     const response = await fetch(
-      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4?confidence=85&overlap=30',
+      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4',
       {
         method: 'POST',
         headers: {
@@ -109,9 +109,15 @@ export async function continueConversation(messages: Message[]) {
         
         const outputs = result.outputs || [];
         const firstOutput = outputs[0] || {};
-        const detectionCount = firstOutput.count_objects || 0;
+        const rawPredictions = Array.isArray(firstOutput.predictions) ? firstOutput.predictions : [];
         
-        console.log('Detection count:', detectionCount);
+        // CRITICAL FIX: Filter by confidence threshold (95%)
+        const CONFIDENCE_THRESHOLD = 0.95;
+        const filteredPredictions = rawPredictions.filter((p: any) => p.confidence >= CONFIDENCE_THRESHOLD);
+        const detectionCount = filteredPredictions.length;
+        
+        console.log('Raw predictions:', rawPredictions.length);
+        console.log('Filtered predictions (>=95%):', detectionCount);
         
         let responseContent = `🌲 Forest Analysis Results:\n\n`;
         
