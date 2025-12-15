@@ -3,12 +3,12 @@
 import OpenAI from 'openai';
 
 /* =========================
-   Message Type (FIXED)
+   Types
    ========================= */
 export type Message = {
   role: 'user' | 'assistant';
   content: string;
-  imageUrl?: string; // ✅ OPTIONAL (FIX ERROR VERCEL)
+  imageUrl?: string;
 };
 
 /* =========================
@@ -19,13 +19,37 @@ const openai = new OpenAI({
 });
 
 /* =========================
+   Check AI Availability
+   ========================= */
+export async function checkAIAvailability(): Promise<{
+  available: boolean;
+  message: string;
+}> {
+  try {
+    // Simple lightweight check
+    await openai.models.list();
+
+    return {
+      available: true,
+      message: 'AI service is online',
+    };
+  } catch (error) {
+    console.error('AI availability check failed:', error);
+
+    return {
+      available: false,
+      message: 'AI service is unavailable',
+    };
+  }
+}
+
+/* =========================
    Continue Conversation
    ========================= */
 export async function continueConversation(
   messages: Message[]
 ): Promise<{ messages: Message[] }> {
   try {
-    // Convert messages to OpenAI format
     const formattedMessages = messages.map((msg) => ({
       role: msg.role,
       content: msg.content,
