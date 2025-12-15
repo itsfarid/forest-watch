@@ -4,17 +4,16 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   display?: React.ReactNode;
-  imageUrl?: string;
+  visualizationImage?: string;
 }
 
 interface RoboflowResponse {
-  predictions: Array<{
-    class: string;
-    confidence: number;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
+  outputs: Array<{
+    output_image?: {
+      type: string;
+      value: string;
+    };
+    count_objects?: number;
   }>;
 }
 
@@ -26,7 +25,7 @@ export async function analyzeForestImage(imageUrl: string) {
   }
 
   try {
-    console.log('Calling Roboflow Workflow API...');
+    console.log('Calling Roboflow Workflow...');
     
     const isBase64 = imageUrl.startsWith('data:image');
     
@@ -51,29 +50,13 @@ export async function analyzeForestImage(imageUrl: string) {
     );
 
     const responseText = await response.text();
-    console.log('API Response Status:', response.status);
-    console.log('API Response Preview:', responseText.substring(0, 200));
 
     if (!response.ok) {
       throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
     }
 
-    const result = JSON.parse(responseText);
-    
-    // Extract predictions from workflow output
-    const outputs = result.outputs || [];
-    const firstOutput = outputs[0] || {};
-    
-    // Get predictions array (might be empty)
-    const predictions = Array.isArray(firstOutput.predictions) ? firstOutput.predictions : [];
-    
-    console.log('Total raw predictions:', predictions.length);
-    
-    // Filter by confidence >= 95%
-    const filteredPredictions = predictions.filter((p: any) => p.confidence >= 0.95);
-    console.log('Filtered predictions (>=95%):', filteredPredictions.length);
-    
-    return { predictions: filteredPredictions };
+    const result: RoboflowResponse = JSON.parse(responseText);
+    return result;
   } catch (error) {
     console.error('Error calling Roboflow:', error);
     throw error;
@@ -103,10 +86,13 @@ export async function continueConversation(messages: Message[]) {
       try {
         const result = await analyzeForestImage(imageUrl);
         
-        const predictions = Array.isArray(result.predictions) ? result.predictions : [];
-        const detectionCount = predictions.length;
+        const outputs = result.outputs || [];
+        const firstOutput = outputs[0] || {};
+        const detectionCount = firstOutput.count_objects || 0;
+        const visualizationImage = firstOutput.output_image?.value;
         
-        console.log('Final detection count:', detectionCount);
+        console.log('Detection count:', detectionCount);
+        console.log('Has visualization:', !!visualizationImage);
         
         let responseContent = `🌲 Forest Analysis Results:\n\n`;
         
@@ -115,19 +101,19 @@ export async function continueConversation(messages: Message[]) {
           responseContent += `The analyzed area appears to be healthy forest with no deforestation indicators.`;
         } else if (detectionCount < 50) {
           responseContent += `⚠️ Deforestation Status: MINIMAL\n\n`;
-          responseContent += `📊 Affected areas detected: ${detectionCount} locations\n`;
+          responseContent += `📊 Deforested areas detected: ${detectionCount} locations\n`;
           responseContent += `📈 Forest coverage: High (~${(100 - (detectionCount / 200) * 100).toFixed(1)}%)\n\n`;
-          responseContent += `💡 Assessment: The area is predominantly healthy forest with minor disturbances detected.`;
+          responseContent += `💡 Assessment: Minor deforestation detected. The area is predominantly healthy forest.`;
         } else if (detectionCount < 80) {
           responseContent += `🔶 Deforestation Status: MODERATE\n\n`;
-          responseContent += `📊 Affected areas detected: ${detectionCount} locations\n`;
-          responseContent += `📈 Estimated deforestation coverage: ~${Math.min((detectionCount / 200) * 100, 100).toFixed(1)}%\n\n`;
-          responseContent += `💡 Assessment: Moderate deforestation detected with scattered cleared patches throughout the area.`;
+          responseContent += `📊 Deforested areas detected: ${detectionCount} locations\n`;
+          responseContent += `📈 Estimated deforestation: ~${Math.min((detectionCount / 200) * 100, 100).toFixed(1)}%\n\n`;
+          responseContent += `💡 Assessment: Moderate deforestation with scattered cleared patches.`;
         } else {
           responseContent += `🔴 Deforestation Status: SEVERE\n\n`;
-          responseContent += `📊 Affected areas detected: ${detectionCount} locations\n`;
-          responseContent += `📈 Estimated deforestation coverage: ~${Math.min((detectionCount / 200) * 100, 100).toFixed(1)}%\n\n`;
-          responseContent += `💡 Assessment: Severe deforestation detected with major habitat loss and environmental impact.`;
+          responseContent += `📊 Deforested areas detected: ${detectionCount} locations\n`;
+          responseContent += `📈 Estimated deforestation: ~${Math.min((detectionCount / 200) * 100, 100).toFixed(1)}%\n\n`;
+          responseContent += `💡 Assessment: Severe deforestation with major habitat loss.`;
         }
         
         return {
@@ -136,7 +122,7 @@ export async function continueConversation(messages: Message[]) {
             {
               role: 'assistant' as const,
               content: responseContent,
-              imageUrl: imageUrl,
+              visualizationImage: visualizationImage,
             },
           ],
         };
@@ -160,7 +146,7 @@ export async function continueConversation(messages: Message[]) {
       ...messages,
       {
         role: 'assistant' as const,
-        content: `🌲 Forest Watch AI\n\nUpload an image or paste URL to analyze for deforestation detection.\n\nI'll check if there are any deforestation indicators in the image.`,
+        content: `🌲 Forest Watch AI\n\nUpload an image or paste URL to analyze for deforestation detection.`,
       },
     ],
   };

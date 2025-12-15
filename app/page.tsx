@@ -150,7 +150,18 @@ export default function Home() {
               <div className={`${message.role === 'user' ? 'bg-slate-200 ml-auto' : 'bg-transparent w-full'} p-3 rounded-lg max-w-[85%]`}>
                 
                 {message.role === 'assistant' && (
-                  <div>{message.content}</div>
+                  <>
+                    {message.imageUrl && (
+                      <div className="mb-3 rounded-md overflow-hidden border border-gray-300">
+                        <img 
+                          src={message.imageUrl} 
+                          alt="Analyzed" 
+                          className="w-full h-auto object-contain max-h-60" 
+                        />
+                      </div>
+                    )}
+                    <div>{message.content}</div>
+                  </>
                 )}
                 
                 {message.role === 'user' && !message.content.startsWith('data:image') && (
