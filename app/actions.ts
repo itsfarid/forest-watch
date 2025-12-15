@@ -44,7 +44,7 @@ export async function checkAIAvailability(): Promise<{
    Roboflow settings (env)
    - ROBOFLOW_API_KEY
    - ROBOFLOW_MODEL_ID (e.g. students-eyecp/deforestation-detection-ivd96-instant-4)
-   - optional: ROBOFLOW_INFERENCE_URL (full inference URL)
+   - optional: ROBOFLOW_INFERENCE_URL (full serverless/workflow inference URL)
    - optional: ROBOFLOW_DETECT_MODEL (detect.roboflow.com slug if different)
    - optional: ROBOFLOW_DEBUG=true to return raw preview to UI when no preds (temporary)
    ========================= */
@@ -85,7 +85,7 @@ function extractPredictionsFromResponse(rfResponse: any): any[] {
   if (Array.isArray(rfResponse?.outputs?.[0]?.predictions)) return rfResponse.outputs[0].predictions;
   if (Array.isArray(rfResponse?.results?.[0]?.predictions)) return rfResponse.results[0].predictions;
   if (Array.isArray(rfResponse?.data?.predictions)) return rfResponse.data.predictions;
-  // Some Roboflow Instant responses may nest predictions in other ways; attempt to find any array named predictions
+  // Some Roboflow Instant / workflows responses may nest predictions; attempt to find any array named predictions
   const findPreds = (obj: any): any[] | null => {
     if (!obj || typeof obj !== 'object') return null;
     if (Array.isArray(obj.predictions)) return obj.predictions;
@@ -121,8 +121,10 @@ function dataUrlToBuffer(dataUrl: string) {
 
 /* =========================
    Analyze image with Roboflow
-   - Try JSON dataURI endpoint first (api.roboflow.com or ROBOFLOW_INFERENCE_URL)
-   - If no predictions returned, fallback to detect.roboflow.com multipart/form-data
+   - Priority order:
+     1) ROBOFLOW_INFERENCE_URL (serverless workflow) -> JSON body { api_key, inputs }
+     2) API JSON infer endpoint (api.roboflow.com/.../infer) -> JSON { image }
+     3) detect.roboflow.com multipart/form-data fallback
    - Logs status for debugging
    ========================= */
 async function analyzeImageWithRoboflow(base64DataUrl: string) {
@@ -130,54 +132,106 @@ async function analyzeImageWithRoboflow(base64DataUrl: string) {
     throw new Error('Roboflow environment variables not configured.');
   }
 
-  // Build JSON inference URL safely (only use encode for path segments)
-  const jsonUrl = ROBOFLOW_INFERENCE_URL
-    ? ROBOFLOW_INFERENCE_URL
-    : `https://api.roboflow.com/${safeModelPath(ROBOFLOW_MODEL_ID!)}?/infer?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`.replace(
-        '?/infer',
-        '/infer'
-      ); // defensive: ensure single slash
+  // Mask helper for logging
+  const maskKey = (k?: string) => (k ? `${k.slice(0, 8)}...` : '<<<no-key>>>');
 
-  // Attempt 1: JSON dataURI POST
-  try {
-    const resp = await fetch(jsonUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: base64DataUrl }),
-    });
+  // 1) Try serverless / workflow inference if URL provided (preferred for workflows)
+  if (ROBOFLOW_INFERENCE_URL) {
+    try {
+      console.log('[Roboflow] Attempting serverless workflow inference at:', ROBOFLOW_INFERENCE_URL);
+      console.log('[Roboflow] api key preview:', maskKey(ROBOFLOW_API_KEY));
 
-    let json: any = null;
-    const contentType = resp.headers.get('content-type') ?? '';
-    if (contentType.includes('application/json')) {
+      const body = {
+        api_key: ROBOFLOW_API_KEY,
+        inputs: {
+          image: {
+            type: 'base64',
+            value: base64DataUrl,
+          },
+        },
+      };
+
+      const resp = await fetch(ROBOFLOW_INFERENCE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const text = await resp.text();
+      let json: any = null;
       try {
-        json = await resp.json();
+        json = JSON.parse(text);
       } catch (e) {
         json = null;
       }
-    } else {
-      // Some error responses are plain text or HTML — capture for debugging
-      const text = await resp.text();
-      console.log('[Roboflow] JSON attempt non-json response (status):', resp.status, 'body-snippet:', text.slice(0, 2000));
-    }
 
-    console.log('[Roboflow] JSON attempt status:', resp.status, 'jsonKeys:', json ? Object.keys(json) : 'no-json');
+      console.log('[Roboflow] serverless attempt status:', resp.status, 'body-snippet:', text.slice(0, 2000));
 
-    const preds = extractPredictionsFromResponse(json);
-    if (Array.isArray(preds) && preds.length > 0) {
-      // include raw response for debugging if requested
-      if (ROBOFLOW_DEBUG) {
-        console.log('[Roboflow] JSON response preview:', JSON.stringify(json).slice(0, 4000));
+      const preds = extractPredictionsFromResponse(json);
+      if (Array.isArray(preds) && preds.length > 0) {
+        if (ROBOFLOW_DEBUG) console.log('[Roboflow] serverless response preview:', JSON.stringify(json).slice(0, 4000));
+        return json;
       }
-      return json;
-    }
 
-    console.log('[Roboflow] JSON-response had no predictions, will try multipart fallback...');
-    // continue to multipart fallback
-  } catch (err) {
-    console.error('[Roboflow] JSON attempt failed:', err);
+      // If serverless returned an explicit error message (helpful for debugging), log it
+      if (json && json.message) {
+        console.log('[Roboflow] serverless message:', json.message);
+      } else {
+        console.log('[Roboflow] serverless returned no predictions, falling back to other endpoints.');
+      }
+    } catch (err) {
+      console.error('[Roboflow] serverless attempt failed:', err);
+      // continue to other attempts
+    }
+  } else {
+    console.log('[Roboflow] No ROBOFLOW_INFERENCE_URL configured, skipping serverless workflow attempt.');
   }
 
-  // Attempt 2: multipart/form-data to detect.roboflow.com/<MODEL_SLUG>
+  // 2) Try JSON dataURI POST to api.roboflow.com/<model>/infer if model id is present
+  let jsonUrl = null;
+  if (ROBOFLOW_MODEL_ID) {
+    jsonUrl = `https://api.roboflow.com/${safeModelPath(ROBOFLOW_MODEL_ID)}/infer?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`;
+  }
+
+  if (jsonUrl) {
+    try {
+      console.log('[Roboflow] Attempting JSON infer at:', jsonUrl.replace(/(api_key=)[^&]+/, '$1<<<masked>>>'));
+      const resp = await fetch(jsonUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64DataUrl }),
+      });
+
+      const contentType = resp.headers.get('content-type') ?? '';
+      let json: any = null;
+      if (contentType.includes('application/json')) {
+        try {
+          json = await resp.json();
+        } catch (e) {
+          json = null;
+        }
+      } else {
+        const txt = await resp.text();
+        console.log('[Roboflow] JSON infer non-json response (status):', resp.status, 'body-snippet:', txt.slice(0, 2000));
+      }
+
+      console.log('[Roboflow] JSON attempt status:', resp.status, 'jsonKeys:', json ? Object.keys(json) : 'no-json');
+
+      const preds = extractPredictionsFromResponse(json);
+      if (Array.isArray(preds) && preds.length > 0) {
+        if (ROBOFLOW_DEBUG) console.log('[Roboflow] JSON response preview:', JSON.stringify(json).slice(0, 4000));
+        return json;
+      }
+
+      console.log('[Roboflow] JSON-response had no predictions, will try multipart fallback...');
+    } catch (err) {
+      console.error('[Roboflow] JSON attempt failed:', err);
+    }
+  } else {
+    console.log('[Roboflow] No ROBOFLOW_MODEL_ID configured, skipping JSON infer attempt.');
+  }
+
+  // 3) Fallback: multipart/form-data to detect.roboflow.com/<MODEL_SLUG>
   const DETECT_MODEL = ROBOFLOW_DETECT_MODEL;
   if (!DETECT_MODEL) {
     throw new Error('Roboflow detect model not configured (ROBOFLOW_DETECT_MODEL or ROBOFLOW_MODEL_ID missing).');
@@ -207,6 +261,7 @@ async function analyzeImageWithRoboflow(base64DataUrl: string) {
     }
 
     const detectUrl = `https://detect.roboflow.com/${safeModelPath(DETECT_MODEL)}?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`;
+    console.log('[Roboflow] multipart detectUrl:', detectUrl.replace(/(api_key=)[^&]+/, '$1<<<masked>>>'));
 
     const r2 = await fetch(detectUrl, {
       method: 'POST',
@@ -214,8 +269,8 @@ async function analyzeImageWithRoboflow(base64DataUrl: string) {
       // DO NOT set Content-Type, boundary will be set automatically
     });
 
-    let json2: any = null;
     const ct2 = r2.headers.get('content-type') ?? '';
+    let json2: any = null;
     if (ct2.includes('application/json')) {
       try {
         json2 = await r2.json();
