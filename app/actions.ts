@@ -26,58 +26,54 @@ export async function analyzeForestImage(imageUrl: string) {
   }
 
   try {
-    console.log('Calling Roboflow Instant Model API...');
+    console.log('Calling Roboflow Workflow API...');
     
     const isBase64 = imageUrl.startsWith('data:image');
     
-    // For Roboflow Instant, use GET with image parameter
-    const modelUrl = `https://detect.roboflow.com/students-eyecp/deforestation-detection-ivd96-instant/4`;
+    const requestBody = {
+      api_key: apiKey,
+      inputs: {
+        image: isBase64 
+          ? { type: 'base64', value: imageUrl.split(',')[1] }
+          : { type: 'url', value: imageUrl }
+      }
+    };
     
-    let apiUrl: string;
-    
-    if (isBase64) {
-      // Base64: POST to upload endpoint
-      apiUrl = `${modelUrl}?api_key=${apiKey}&confidence=95`;
-      
-      const response = await fetch(apiUrl, {
+    const response = await fetch(
+      'https://serverless.roboflow.com/students-eyecp/workflows/detect-count-and-visualize-4',
+      {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
-        body: imageUrl.split(',')[1],
-      });
-
-      const responseText = await response.text();
-      console.log('API Response Status:', response.status);
-
-      if (!response.ok) {
-        throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
+        body: JSON.stringify(requestBody),
       }
+    );
 
-      const result: RoboflowResponse = JSON.parse(responseText);
-      console.log('Predictions count:', result.predictions?.length || 0);
-      
-      return result;
-    } else {
-      // URL: Use GET request
-      apiUrl = `${modelUrl}?api_key=${apiKey}&confidence=95&image=${encodeURIComponent(imageUrl)}`;
-      
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-      });
+    const responseText = await response.text();
+    console.log('API Response Status:', response.status);
+    console.log('API Response Preview:', responseText.substring(0, 200));
 
-      const responseText = await response.text();
-      console.log('API Response Status:', response.status);
-
-      if (!response.ok) {
-        throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
-      }
-
-      const result: RoboflowResponse = JSON.parse(responseText);
-      console.log('Predictions count:', result.predictions?.length || 0);
-      
-      return result;
+    if (!response.ok) {
+      throw new Error(`Roboflow API error (${response.status}): ${responseText}`);
     }
+
+    const result = JSON.parse(responseText);
+    
+    // Extract predictions from workflow output
+    const outputs = result.outputs || [];
+    const firstOutput = outputs[0] || {};
+    
+    // Get predictions array (might be empty)
+    const predictions = Array.isArray(firstOutput.predictions) ? firstOutput.predictions : [];
+    
+    console.log('Total raw predictions:', predictions.length);
+    
+    // Filter by confidence >= 95%
+    const filteredPredictions = predictions.filter((p: any) => p.confidence >= 0.95);
+    console.log('Filtered predictions (>=95%):', filteredPredictions.length);
+    
+    return { predictions: filteredPredictions };
   } catch (error) {
     console.error('Error calling Roboflow:', error);
     throw error;
