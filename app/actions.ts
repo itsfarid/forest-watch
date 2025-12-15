@@ -19,6 +19,28 @@ const openai = new OpenAI({
 });
 
 /* =========================
+   Check AI Availability (exported again because UI imports it)
+   ========================= */
+export async function checkAIAvailability(): Promise<{
+  available: boolean;
+  message: string;
+}> {
+  try {
+    await openai.models.list();
+    return {
+      available: true,
+      message: 'AI service is online',
+    };
+  } catch (error) {
+    console.error('AI availability check failed:', error);
+    return {
+      available: false,
+      message: 'AI service is unavailable',
+    };
+  }
+}
+
+/* =========================
    Roboflow settings (set di env)
    - ROBOFLOW_API_KEY: kunci API Roboflow
    - ROBOFLOW_MODEL_ID: model id / model path seperti "students-eyecp/deforestation-detection-ivd96-instant-4"
@@ -35,26 +57,33 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function roboflowSafeCheck() {
+  return Boolean(ROBOFLOW_API_KEY && (ROBOFLOW_MODEL_ID || ROBOFLOW_INFERENCE_URL));
+}
+
+/* =========================
+   Analyze image with Roboflow
+   ========================= */
 async function analyzeImageWithRoboflow(base64DataUrl: string) {
-  if (!ROB0FLOW_SAFE_CHECK()) {
+  if (!roboflowSafeCheck()) {
     throw new Error('Roboflow environment variables not configured.');
   }
 
-  // Build inference URL:
-  // If ROBOFLOW_INFERENCE_URL diberikan, gunakan itu.
-  // Jika tidak, gunakan pattern: https://api.roboflow.com/{MODEL_ID}/infer?api_key={API_KEY}
+  // use non-null assertion because we already checked presence above
   const baseUrl = ROBOFLOW_INFERENCE_URL
     ? ROBOFLOW_INFERENCE_URL
-    : `https://api.roboflow.com/${encodeURIComponent(ROBOFLOW_MODEL_ID)}/infer?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`;
+    : `https://api.roboflow.com/${encodeURIComponent(ROBOFLOW_MODEL_ID!)} /infer?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`.replace(
+        ' /infer',
+        '/infer'
+      );
 
-  // Roboflow Instant accepts a POST with JSON { image: "<dataURI or url>" }
+  // Roboflow Instant / most infer endpoints accept JSON { image: "<dataURI or url>" }
   const res = await fetch(baseUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      // Roboflow expects either an image URL or base64 data URI string
       image: base64DataUrl,
     }),
   });
@@ -68,12 +97,7 @@ async function analyzeImageWithRoboflow(base64DataUrl: string) {
   }
 
   const json = await res.json();
-  // Typical Roboflow response contains `predictions` array; some deployments also return an `image` or `annotated` url
   return json;
-}
-
-function ROB0FLOW_SAFE_CHECK() {
-  return Boolean(ROBOFLOW_API_KEY && (ROBOFLOW_MODEL_ID || ROBOFLOW_INFERENCE_URL));
 }
 
 /* =========================
@@ -84,30 +108,24 @@ function ROB0FLOW_SAFE_CHECK() {
 export async function continueConversation(
   messages: Message[]
 ): Promise<{ messages: Message[] }> {
-  // if no messages, just return
   if (!messages || messages.length === 0) {
     return { messages };
   }
 
   const last = messages[messages.length - 1];
 
-  // If last message is a base64 data url image => call Roboflow
+  // Handle base64 image data
   if (last.role === 'user' && typeof last.content === 'string' && last.content.startsWith('data:image')) {
     try {
       const rfResponse = await analyzeImageWithRoboflow(last.content);
 
-      const predictions: Array<{
-        confidence?: number;
-        class?: string;
-      }> = Array.isArray(rfResponse.predictions) ? rfResponse.predictions : [];
+      const predictions: Array<{ confidence?: number; class?: string }> = Array.isArray(rfResponse.predictions)
+        ? rfResponse.predictions
+        : [];
 
       const total = predictions.length;
-      const avgConf =
-        total > 0
-          ? predictions.reduce((s, p) => s + (p.confidence ?? 0), 0) / total
-          : 0;
+      const avgConf = total > 0 ? predictions.reduce((s, p) => s + (p.confidence ?? 0), 0) / total : 0;
 
-      // Build short list of top 5 predictions by confidence
       const top = predictions
         .slice()
         .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
@@ -117,14 +135,13 @@ export async function continueConversation(
           confidence: (p.confidence ?? 0) * 100,
         }));
 
-      // If Roboflow returns an annotated image URL, attach it.
-      // Some Roboflow inference endpoints include `image` or `annotated` field — check your model's response.
+      // Roboflow may return an annotated image URL under different keys
       const annotatedImageUrl = rfResponse.image ?? rfResponse.annotated ?? rfResponse.output_image ?? null;
 
-      const assistantContentLines = [
+      const assistantContentLines: string[] = [
         `✅ Image analyzed with Roboflow model (${ROBOFLOW_MODEL_ID ?? 'roboflow model'}).`,
         `Detections: ${total}`,
-        `Average confidence: ${Math.round(avgConf * 100) / 100}`,
+        `Average confidence: ${Math.round(avgConf * 10000) / 100} %`,
         '',
       ];
 
@@ -144,16 +161,12 @@ export async function continueConversation(
 
       if (annotatedImageUrl) assistantMessage.imageUrl = annotatedImageUrl;
 
-      // Optionally, if you want full predictions in message content (for debug), you could attach JSON string
-      // assistantMessage.content += `\n\nRaw predictions:\n${JSON.stringify(predictions, null, 2)}`
-
       return {
         messages: [...messages, assistantMessage],
       };
     } catch (err: any) {
       console.error('Roboflow analysis failed:', err);
 
-      // If Roboflow fails, return helpful assistant message
       return {
         messages: [
           ...messages,
@@ -168,7 +181,7 @@ export async function continueConversation(
     }
   }
 
-  // Fallback: text-only chat completion with OpenAI
+  // Fallback: OpenAI chat completion for text
   try {
     const formattedMessages = messages.map((msg) => ({
       role: msg.role,
@@ -183,9 +196,7 @@ export async function continueConversation(
 
     const assistantMessage: Message = {
       role: 'assistant',
-      content:
-        response.choices[0]?.message?.content ??
-        '⚠️ No response generated.',
+      content: response.choices[0]?.message?.content ?? '⚠️ No response generated.',
     };
 
     return {
