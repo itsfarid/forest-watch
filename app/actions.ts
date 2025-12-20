@@ -42,11 +42,6 @@ export async function checkAIAvailability(): Promise<{
 
 /* =========================
    Roboflow settings (env)
-   - ROBOFLOW_API_KEY
-   - ROBOFLOW_MODEL_ID (e.g. students-eyecp/deforestation-detection-ivd96-instant-4)
-   - optional: ROBOFLOW_INFERENCE_URL (full serverless/workflow inference URL)
-   - optional: ROBOFLOW_DETECT_MODEL (detect.roboflow.com slug if different)
-   - optional: ROBOFLOW_DEBUG=true to return raw preview to UI when no preds (temporary)
    ========================= */
 const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY;
 const ROBOFLOW_MODEL_ID = process.env.ROBOFLOW_MODEL_ID;
@@ -68,10 +63,6 @@ function roboflowSafeCheck() {
   );
 }
 
-/**
- * Encode each segment of a path but preserve slashes.
- * Example: 'owner/project/model-version' => 'owner/project/model-version' with each segment URI-encoded.
- */
 function safeModelPath(id: string) {
   return id
     .split('/')
@@ -85,7 +76,7 @@ function extractPredictionsFromResponse(rfResponse: any): any[] {
   if (Array.isArray(rfResponse?.outputs?.[0]?.predictions)) return rfResponse.outputs[0].predictions;
   if (Array.isArray(rfResponse?.results?.[0]?.predictions)) return rfResponse.results[0].predictions;
   if (Array.isArray(rfResponse?.data?.predictions)) return rfResponse.data.predictions;
-  // Some Roboflow Instant / workflows responses may nest predictions; attempt to find any array named predictions
+  
   const findPreds = (obj: any): any[] | null => {
     if (!obj || typeof obj !== 'object') return null;
     if (Array.isArray(obj.predictions)) return obj.predictions;
@@ -102,13 +93,22 @@ function extractPredictionsFromResponse(rfResponse: any): any[] {
   return Array.isArray(nested) ? nested : [];
 }
 
+/**
+ * [FIXED] Fungsi ini sekarang memvalidasi tipe data.
+ * Mencegah object metadata (seperti {width:800}) dianggap sebagai string gambar.
+ */
 function annotatedImageFromResponse(rfResponse: any): string | null {
-  return rfResponse?.image ?? rfResponse?.annotated ?? rfResponse?.output_image ?? rfResponse?.annotated_image ?? null;
+  const candidate = rfResponse?.image ?? rfResponse?.annotated ?? rfResponse?.output_image ?? rfResponse?.annotated_image ?? null;
+  
+  // Hanya return jika tipe-nya string dan cukup panjang (valid base64/url)
+  if (typeof candidate === 'string' && candidate.length > 100) {
+    return candidate;
+  }
+  return null;
 }
 
 /* =========================
    Convert dataURL -> Buffer & mime
-   More tolerant regex to allow extra attributes before ;base64
    ========================= */
 function dataUrlToBuffer(dataUrl: string) {
   const match = dataUrl.match(/^data:([^;]+);.*base64,(.+)$/);
@@ -121,21 +121,15 @@ function dataUrlToBuffer(dataUrl: string) {
 
 /* =========================
    Analyze image with Roboflow
-   - Priority order:
-     1) ROBOFLOW_INFERENCE_URL (serverless workflow) -> JSON body { api_key, inputs }
-     2) API JSON infer endpoint (api.roboflow.com/.../infer) -> JSON { image }
-     3) detect.roboflow.com multipart/form-data fallback
-   - Logs status for debugging
    ========================= */
 async function analyzeImageWithRoboflow(base64DataUrl: string) {
   if (!roboflowSafeCheck()) {
     throw new Error('Roboflow environment variables not configured.');
   }
 
-  // Mask helper for logging
   const maskKey = (k?: string) => (k ? `${k.slice(0, 8)}...` : '<<<no-key>>>');
 
-  // 1) Try serverless / workflow inference if URL provided (preferred for workflows)
+  // 1) Serverless Workflow (Prioritas jika ENV ada)
   if (ROBOFLOW_INFERENCE_URL) {
     try {
       console.log('[Roboflow] Attempting serverless workflow inference at:', ROBOFLOW_INFERENCE_URL);
@@ -173,7 +167,6 @@ async function analyzeImageWithRoboflow(base64DataUrl: string) {
         return json;
       }
 
-      // If serverless returned an explicit error message (helpful for debugging), log it
       if (json && json.message) {
         console.log('[Roboflow] serverless message:', json.message);
       } else {
@@ -181,13 +174,12 @@ async function analyzeImageWithRoboflow(base64DataUrl: string) {
       }
     } catch (err) {
       console.error('[Roboflow] serverless attempt failed:', err);
-      // continue to other attempts
     }
   } else {
     console.log('[Roboflow] No ROBOFLOW_INFERENCE_URL configured, skipping serverless workflow attempt.');
   }
 
-  // 2) Try JSON dataURI POST to api.roboflow.com/<model>/infer if model id is present
+  // 2) JSON Infer Endpoint
   let jsonUrl = null;
   if (ROBOFLOW_MODEL_ID) {
     jsonUrl = `https://api.roboflow.com/${safeModelPath(ROBOFLOW_MODEL_ID)}/infer?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`;
@@ -231,7 +223,7 @@ async function analyzeImageWithRoboflow(base64DataUrl: string) {
     console.log('[Roboflow] No ROBOFLOW_MODEL_ID configured, skipping JSON infer attempt.');
   }
 
-  // 3) Fallback: multipart/form-data to detect.roboflow.com/<MODEL_SLUG>
+  // 3) Multipart Fallback (Direct API)
   const DETECT_MODEL = ROBOFLOW_DETECT_MODEL;
   if (!DETECT_MODEL) {
     throw new Error('Roboflow detect model not configured (ROBOFLOW_DETECT_MODEL or ROBOFLOW_MODEL_ID missing).');
@@ -239,23 +231,18 @@ async function analyzeImageWithRoboflow(base64DataUrl: string) {
 
   try {
     const { buffer, mime } = dataUrlToBuffer(base64DataUrl);
-
-    // Build FormData. Modern Node (18+) / undici exposes global FormData & Blob.
     const form = new FormData();
     try {
-      // Try Blob first (web-compatible)
       // @ts-ignore
       const blob = typeof Blob !== 'undefined' ? new Blob([buffer], { type: mime }) : null;
       if (blob) {
         // @ts-ignore
         form.append('file', blob, 'upload.jpg');
       } else {
-        // fallback: append buffer (some runtimes accept Buffer in FormData append)
         // @ts-ignore
         form.append('file', buffer, { filename: 'upload.jpg', contentType: mime });
       }
     } catch (e) {
-      // fallback: append Buffer with options (some runtimes accept it)
       // @ts-ignore
       form.append('file', buffer, { filename: 'upload.jpg', contentType: mime });
     }
@@ -266,7 +253,6 @@ async function analyzeImageWithRoboflow(base64DataUrl: string) {
     const r2 = await fetch(detectUrl, {
       method: 'POST',
       body: form as any,
-      // DO NOT set Content-Type, boundary will be set automatically
     });
 
     const ct2 = r2.headers.get('content-type') ?? '';
@@ -297,8 +283,6 @@ async function analyzeImageWithRoboflow(base64DataUrl: string) {
 
 /* =========================
    Continue Conversation
-   - If last user message is a data:image... base64, call Roboflow and return structured assistant message
-   - Otherwise, fallback to OpenAI chat completion
    ========================= */
 export async function continueConversation(
   messages: Message[]
@@ -331,7 +315,7 @@ export async function continueConversation(
 
       const annotatedImageUrl = annotatedImageFromResponse(rfResponse);
 
-      // If no predictions and debug enabled, return preview to UI for troubleshooting
+      // Debug View
       if ((!predictions || predictions.length === 0) && ROBOFLOW_DEBUG) {
         const raw = typeof rfResponse === 'string' ? rfResponse : JSON.stringify(rfResponse, null, 2);
         const assistantMessage: Message = {
@@ -362,7 +346,11 @@ export async function continueConversation(
         content: assistantContentLines.join('\n'),
       };
 
-      if (annotatedImageUrl) assistantMessage.imageUrl = annotatedImageUrl;
+      if (annotatedImageUrl) {
+        assistantMessage.imageUrl = annotatedImageUrl;
+      } else {
+        assistantMessage.imageUrl = last.content;
+      }
 
       return {
         messages: [...messages, assistantMessage],
