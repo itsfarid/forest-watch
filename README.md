@@ -234,5 +234,3 @@ Software Engineering Student | Security Researcher | Backend Developer
 * 🌐 [Portfolio](https://itsfarid.com/)
 * 💼 [LinkedIn](https://linkedin.com/in/itsfarid)
 * 🐙 [GitHub](https://github.com/itsfarid)
-
-> Developed as part of the Artificial Intelligence (AI) Final Semester Project at Telkom University.
