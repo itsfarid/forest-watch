@@ -47,8 +47,6 @@
 | :---: | :---: |
 | ![Dashboard UI](./public/screenshots/dashboard.png) | ![Detection Example](./public/screenshots/detection-result.png) |
 
-*(Replace the image paths above with actual screenshots from your project. Make sure they look good!)*
-
 ---
 
 ## 🎯 Project Overview
