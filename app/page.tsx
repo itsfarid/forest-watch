@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { IconArrowUp } from '@/components/ui/icons';
+import { IMAGE_COMPRESSION } from '@/lib/config/constants';
 
 const CONFIDENCE_DEFAULT = 0.5;
 const CONFIDENCE_STORAGE_KEY = 'fw_confidence_threshold';
@@ -52,18 +53,23 @@ export default function Home() {
         img.src = event.target?.result as string;
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 800;
-          const scaleSize = MAX_WIDTH / img.width;
-          const width = MAX_WIDTH;
-          const height = img.height * scaleSize;
+
+          // Only resize if image exceeds max dimensions -- never upscale smaller images
+          const scaleRatio = Math.min(
+            IMAGE_COMPRESSION.MAX_WIDTH / img.width,
+            IMAGE_COMPRESSION.MAX_HEIGHT / img.height,
+            1 // clamp to 1 so images smaller than max are not upscaled
+          );
+          const width = Math.round(img.width * scaleRatio);
+          const height = Math.round(img.height * scaleRatio);
 
           canvas.width = width;
           canvas.height = height;
-          
+
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
-          
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+
+          const compressedBase64 = canvas.toDataURL('image/jpeg', IMAGE_COMPRESSION.QUALITY);
           resolve(compressedBase64);
         };
       };
@@ -123,8 +129,29 @@ export default function Home() {
     setConversation(newHistory);
 
     try {
+      // Race between the actual request and a timeout
+      // If timeout wins, loading is reset and user gets a clear message
+      let timedOut = false;
+
+      const timeoutId = setTimeout(() => {
+        timedOut = true;
+        setIsLoading(false);
+        setConversation([
+          ...newHistory,
+          {
+            role: 'assistant',
+            content: '❌ Permintaan memakan waktu terlalu lama. Coba lagi.'
+          }
+        ]);
+      }, IMAGE_COMPRESSION.SUBMIT_TIMEOUT_MS);
+
       const { messages } = await continueConversation(newHistory, confidenceThreshold);
-      setConversation(messages);
+      clearTimeout(timeoutId);
+
+      // Only update state if timeout hasn't already fired
+      if (!timedOut) {
+        setConversation(messages);
+      }
     } catch (error) {
       console.error("Error submitting:", error);
       const userMessage =
