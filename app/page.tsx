@@ -113,9 +113,13 @@ export default function Home() {
       setConversation(messages);
     } catch (error) {
       console.error("Error submitting:", error);
+      const userMessage =
+        error instanceof Error && 'userMessage' in error
+          ? (error as { userMessage: string }).userMessage
+          : "Terjadi kesalahan. Periksa koneksi internet Anda dan coba lagi.";
       setConversation([
         ...newHistory,
-        { role: 'assistant', content: "❌ Failed to analyze image. Please check API Key or try another image." }
+        { role: 'assistant', content: `❌ ${userMessage}` }
       ]);
     } finally {
       setIsLoading(false);

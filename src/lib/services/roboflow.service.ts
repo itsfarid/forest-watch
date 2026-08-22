@@ -11,6 +11,7 @@ import {
 } from '@/lib/types/roboflow.types';
 import { sleep, calculateBackoff, isRetryableError } from '@/lib/utils';
 import { ROBOFLOW_DEFAULTS } from '@/lib/config/constants';
+import { roboflowErrorFromStatus, roboflowErrorFromException, RoboflowError } from '@/lib/errors/api-errors';
 
 /**
  * Get Roboflow configuration from environment variables
@@ -139,26 +140,26 @@ export async function callRoboflowInferenceAPI(
 
       // Non-retryable errors (400, 401, 403, 404, etc.) — bail out immediately
       if (!isRetryableError(error)) {
-        console.error('Roboflow API call failed with non-retryable error:', error);
+        const appErr = error instanceof RoboflowError
+          ? error
+          : roboflowErrorFromException(error);
+        console.error('Roboflow API call failed with non-retryable error:', appErr.technicalMessage);
         return {
           success: false,
           predictions: [],
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Roboflow API call failed with a non-retryable error',
+          error: appErr.userMessage,
         };
       }
 
       if (isLastAttempt) {
-        console.error('Roboflow API call failed after all retries:', error);
+        const appErr = error instanceof RoboflowError
+          ? error
+          : roboflowErrorFromException(error);
+        console.error('Roboflow API call failed after all retries:', appErr.technicalMessage);
         return {
           success: false,
           predictions: [],
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Failed to call Roboflow API after multiple attempts',
+          error: appErr.userMessage,
         };
       }
 
@@ -167,9 +168,11 @@ export async function callRoboflowInferenceAPI(
         attempt,
         ROBOFLOW_DEFAULTS.INITIAL_RETRY_DELAY_MS
       );
+      const errMsg = error instanceof RoboflowError
+        ? error.technicalMessage
+        : error instanceof Error ? error.message : String(error);
       console.warn(
-        `Roboflow API call attempt ${attempt + 1} failed, retrying in ${delayMs}ms...`,
-        error
+        `Roboflow API call attempt ${attempt + 1} failed, retrying in ${delayMs}ms... (${errMsg})`
       );
       await sleep(delayMs);
     }
@@ -254,7 +257,7 @@ async function tryCustomInferenceUrl(
     });
 
     if (!res.ok) {
-      throw new Error(`Custom inference URL failed: ${res.status} ${res.statusText}`);
+      throw roboflowErrorFromStatus(res.status, res.statusText);
     }
 
     const data: RoboflowInferenceResponse = await res.json();
@@ -266,12 +269,9 @@ async function tryCustomInferenceUrl(
       visualization: data.visualization,
     };
   } catch (error) {
+    if (error instanceof RoboflowError) throw error;
     console.warn('Custom inference URL attempt failed:', error);
-    return {
-      success: false,
-      predictions: [],
-      error: error instanceof Error ? error.message : 'Custom inference URL failed',
-    };
+    throw roboflowErrorFromException(error);
   }
 }
 
@@ -306,7 +306,7 @@ async function tryJsonApiEndpoint(
     });
 
     if (!res.ok) {
-      throw new Error(`JSON API endpoint failed: ${res.status} ${res.statusText}`);
+      throw roboflowErrorFromStatus(res.status, res.statusText);
     }
 
     const data: RoboflowInferenceResponse = await res.json();
@@ -318,12 +318,9 @@ async function tryJsonApiEndpoint(
       visualization: data.visualization,
     };
   } catch (error) {
+    if (error instanceof RoboflowError) throw error;
     console.warn('JSON API endpoint attempt failed:', error);
-    return {
-      success: false,
-      predictions: [],
-      error: error instanceof Error ? error.message : 'JSON API endpoint failed',
-    };
+    throw roboflowErrorFromException(error);
   }
 }
 
@@ -368,7 +365,7 @@ async function tryDetectEndpoint(
     });
 
     if (!res.ok) {
-      throw new Error(`Detect endpoint failed: ${res.status} ${res.statusText}`);
+      throw roboflowErrorFromStatus(res.status, res.statusText);
     }
 
     const data: RoboflowInferenceResponse = await res.json();
@@ -390,11 +387,8 @@ async function tryDetectEndpoint(
       visualization: data.visualization,
     };
   } catch (error) {
+    if (error instanceof RoboflowError) throw error;
     console.warn('Detect endpoint attempt failed:', error);
-    return {
-      success: false,
-      predictions: [],
-      error: error instanceof Error ? error.message : 'Detect endpoint failed',
-    };
+    throw roboflowErrorFromException(error);
   }
 }

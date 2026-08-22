@@ -5,6 +5,7 @@
 
 import OpenAI from 'openai';
 import { OPENAI_DEFAULTS } from '@/lib/config/constants';
+import { openaiErrorFromException } from '@/lib/errors/api-errors';
 
 // Singleton OpenAI client instance
 let openaiClient: OpenAI | null = null;
@@ -63,11 +64,15 @@ export async function generateChatCompletion(
 ): Promise<string> {
   const client = getOpenAIClient();
 
-  const response = await client.chat.completions.create({
-    model: options?.model || OPENAI_DEFAULTS.MODEL,
-    messages,
-    temperature: options?.temperature ?? OPENAI_DEFAULTS.TEMPERATURE,
-  });
+  try {
+    const response = await client.chat.completions.create({
+      model: options?.model || OPENAI_DEFAULTS.MODEL,
+      messages,
+      temperature: options?.temperature ?? OPENAI_DEFAULTS.TEMPERATURE,
+    });
 
-  return response.choices[0]?.message?.content ?? '';
+    return response.choices[0]?.message?.content ?? '';
+  } catch (error) {
+    throw openaiErrorFromException(error);
+  }
 }

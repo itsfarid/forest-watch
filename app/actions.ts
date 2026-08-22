@@ -8,6 +8,7 @@
 import { checkAIAvailability as checkAI, generateChatCompletion } from '@/lib/services/openai.service';
 import { callRoboflowInferenceAPI, isRoboflowConfigured, getRoboflowConfig } from '@/lib/services/roboflow.service';
 import { Message, ConversationResult } from '@/lib/types/message.types';
+import { AppError, openaiErrorFromException } from '@/lib/errors/api-errors';
 
 // Re-export types for backward compatibility
 export type { Message };
@@ -210,15 +211,17 @@ async function handleTextChat(messages: Message[]): Promise<ConversationResult> 
       messages: [...messages, assistantMessage],
     };
   } catch (error) {
-    console.error('continueConversation text chat error:', error);
+    const appErr = error instanceof AppError
+      ? error
+      : openaiErrorFromException(error);
+    console.error('continueConversation text chat error:', appErr.technicalMessage);
 
     return {
       messages: [
         ...messages,
         {
           role: 'assistant',
-          content:
-            '❌ Failed to process request. Please check API key(s) and server logs, or try again later.',
+          content: `❌ ${appErr.userMessage}`,
         },
       ],
     };
