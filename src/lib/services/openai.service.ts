@@ -6,6 +6,10 @@
 import OpenAI from 'openai';
 import { OPENAI_DEFAULTS } from '@/lib/config/constants';
 import { openaiErrorFromException } from '@/lib/errors/api-errors';
+import { validateOpenAIEnv } from '@/lib/config/env';
+
+// Validate required env vars at module load time
+validateOpenAIEnv();
 
 // Singleton OpenAI client instance
 let openaiClient: OpenAI | null = null;

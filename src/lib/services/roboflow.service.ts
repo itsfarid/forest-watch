@@ -12,6 +12,10 @@ import {
 import { sleep, calculateBackoff, isRetryableError } from '@/lib/utils';
 import { ROBOFLOW_DEFAULTS } from '@/lib/config/constants';
 import { roboflowErrorFromStatus, roboflowErrorFromException, RoboflowError } from '@/lib/errors/api-errors';
+import { validateEnv } from '@/lib/config/env';
+
+// Validate required env vars at module load time
+validateEnv();
 
 /**
  * Get Roboflow configuration from environment variables

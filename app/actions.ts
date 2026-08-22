@@ -10,6 +10,8 @@ import { callRoboflowInferenceAPI, isRoboflowConfigured, getRoboflowConfig } fro
 import { Message, ConversationResult } from '@/lib/types/message.types';
 import { AppError, openaiErrorFromException } from '@/lib/errors/api-errors';
 import { ROBOFLOW_DEFAULTS } from '@/lib/config/constants';
+import { validateImageDataUri } from '@/lib/validation/image';
+import { sanitizeTextInput } from '@/lib/validation/text';
 
 // Re-export types for backward compatibility
 export type { Message };
@@ -121,6 +123,20 @@ async function handleImageAnalysis(
     }
   }
 
+  // Server-side image validation -- must run before sending to Roboflow
+  const imageValidationError = validateImageDataUri(imageDataUri);
+  if (imageValidationError) {
+    return {
+      messages: [
+        ...messages,
+        {
+          role: 'assistant',
+          content: `❌ ${imageValidationError}`,
+        },
+      ],
+    };
+  }
+
   // Call Roboflow inference API
   const result = await callRoboflowInferenceAPI(imageDataUri, clientConfidenceThreshold);
 
@@ -198,9 +214,10 @@ async function handleImageAnalysis(
  */
 async function handleTextChat(messages: Message[]): Promise<ConversationResult> {
   try {
+    // Sanitize user messages before sending to OpenAI
     const formattedMessages = messages.map((msg) => ({
       role: msg.role,
-      content: msg.content,
+      content: msg.role === 'user' ? sanitizeTextInput(msg.content) : msg.content,
     }));
 
     const responseContent = await generateChatCompletion(formattedMessages);
