@@ -9,7 +9,7 @@ import {
   RoboflowCallResult,
   RoboflowConfig,
 } from '@/lib/types/roboflow.types';
-import { sleep, calculateBackoff } from '@/lib/utils';
+import { sleep, calculateBackoff, isRetryableError } from '@/lib/utils';
 import { ROBOFLOW_DEFAULTS } from '@/lib/config/constants';
 
 /**
@@ -136,6 +136,19 @@ export async function callRoboflowInferenceAPI(
       return result;
     } catch (error) {
       const isLastAttempt = attempt === ROBOFLOW_DEFAULTS.MAX_RETRIES - 1;
+
+      // Non-retryable errors (400, 401, 403, 404, etc.) — bail out immediately
+      if (!isRetryableError(error)) {
+        console.error('Roboflow API call failed with non-retryable error:', error);
+        return {
+          success: false,
+          predictions: [],
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Roboflow API call failed with a non-retryable error',
+        };
+      }
 
       if (isLastAttempt) {
         console.error('Roboflow API call failed after all retries:', error);
