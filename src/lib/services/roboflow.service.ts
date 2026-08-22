@@ -126,14 +126,20 @@ export function extractPredictionsFromResponse(
  * 3) Detect endpoint fallback (detect.roboflow.com with multipart/form-data)
  */
 export async function callRoboflowInferenceAPI(
-  imageDataUri: string
+  imageDataUri: string,
+  confidenceThreshold?: number
 ): Promise<RoboflowCallResult> {
   const config = getRoboflowConfig();
+
+  // Override confidence threshold from client if provided
+  const effectiveConfig = confidenceThreshold !== undefined
+    ? { ...config, confidenceThreshold }
+    : config;
 
   // Try with retry logic
   for (let attempt = 0; attempt < ROBOFLOW_DEFAULTS.MAX_RETRIES; attempt++) {
     try {
-      const result = await callRoboflowInferenceAPIOnce(imageDataUri, config);
+      const result = await callRoboflowInferenceAPIOnce(imageDataUri, effectiveConfig);
       return result;
     } catch (error) {
       const isLastAttempt = attempt === ROBOFLOW_DEFAULTS.MAX_RETRIES - 1;

@@ -1,11 +1,14 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { continueConversation, Message } from '@/app/actions';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { IconArrowUp } from '@/components/ui/icons';
+
+const CONFIDENCE_DEFAULT = 0.5;
+const CONFIDENCE_STORAGE_KEY = 'fw_confidence_threshold';
 
 const IconPaperclip = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -27,7 +30,18 @@ export default function Home() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(() => {
+    if (typeof window === 'undefined') return CONFIDENCE_DEFAULT;
+    const stored = localStorage.getItem(CONFIDENCE_STORAGE_KEY);
+    const parsed = stored ? parseFloat(stored) : NaN;
+    return isNaN(parsed) ? CONFIDENCE_DEFAULT : parsed;
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Persist threshold preference to localStorage
+  useEffect(() => {
+    localStorage.setItem(CONFIDENCE_STORAGE_KEY, confidenceThreshold.toString());
+  }, [confidenceThreshold]);
 
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve) => {
@@ -109,7 +123,7 @@ export default function Home() {
     setConversation(newHistory);
 
     try {
-      const { messages } = await continueConversation(newHistory);
+      const { messages } = await continueConversation(newHistory, confidenceThreshold);
       setConversation(messages);
     } catch (error) {
       console.error("Error submitting:", error);
@@ -197,6 +211,33 @@ export default function Home() {
 
         <div className="fixed inset-x-0 bottom-10 w-full z-10 px-4">
           <div className="w-full max-w-xl mx-auto">
+
+            {/* Confidence threshold slider — only shown when an image is selected */}
+            {selectedImage && (
+              <div className="mb-2 bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-sm">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-gray-600">
+                    Sensitivitas deteksi
+                  </label>
+                  <span className="text-xs font-semibold text-green-700">
+                    {Math.round(confidenceThreshold * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1.0}
+                  step={0.05}
+                  value={confidenceThreshold}
+                  onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
+                  className="w-full h-1.5 accent-green-600 cursor-pointer"
+                  aria-label="Confidence threshold"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Rendah = lebih banyak area terdeteksi · Tinggi = lebih presisi
+                </p>
+              </div>
+            )}
             {selectedImage && (
               <div className="mb-2 relative w-fit animate-in fade-in slide-in-from-bottom-2">
                 <div className="relative rounded-lg overflow-hidden border border-slate-300 shadow-md">

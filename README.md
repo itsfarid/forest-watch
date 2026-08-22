@@ -160,6 +160,11 @@ graph LR
     ```env
     ROBOFLOW_API_KEY=your_api_key_here
     ROBOFLOW_MODEL_ID=deforestation-detection-ivd96/5
+
+    # Confidence threshold (0.0–1.0). Default: 0.5
+    # Lower = more detections, higher chance of false positives
+    # Higher = fewer detections, more precise results
+    # Can also be adjusted live via the UI slider
     ROBOFLOW_CONFIDENCE_THRESHOLD=0.5
     ```
 

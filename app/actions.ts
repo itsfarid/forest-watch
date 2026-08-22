@@ -9,6 +9,7 @@ import { checkAIAvailability as checkAI, generateChatCompletion } from '@/lib/se
 import { callRoboflowInferenceAPI, isRoboflowConfigured, getRoboflowConfig } from '@/lib/services/roboflow.service';
 import { Message, ConversationResult } from '@/lib/types/message.types';
 import { AppError, openaiErrorFromException } from '@/lib/errors/api-errors';
+import { ROBOFLOW_DEFAULTS } from '@/lib/config/constants';
 
 // Re-export types for backward compatibility
 export type { Message };
@@ -28,7 +29,8 @@ export async function checkAIAvailability(): Promise<{
  * Handles both image analysis (via Roboflow) and text chat (via OpenAI)
  */
 export async function continueConversation(
-  messages: Message[]
+  messages: Message[],
+  confidenceThreshold?: number
 ): Promise<ConversationResult> {
   const lastMessage = messages[messages.length - 1];
   
@@ -58,7 +60,7 @@ export async function continueConversation(
 
   // If it's an image, process with Roboflow
   if (isImageDataUri || isImageUrl) {
-    return await handleImageAnalysis(messages, userContent, isImageUrl);
+    return await handleImageAnalysis(messages, userContent, isImageUrl, confidenceThreshold);
   }
 
   // Otherwise, process as text chat with OpenAI
@@ -71,7 +73,8 @@ export async function continueConversation(
 async function handleImageAnalysis(
   messages: Message[],
   imageContent: string,
-  isUrl: boolean
+  isUrl: boolean,
+  clientConfidenceThreshold?: number
 ): Promise<ConversationResult> {
   // Check if Roboflow is configured
   if (!isRoboflowConfigured()) {
@@ -119,7 +122,7 @@ async function handleImageAnalysis(
   }
 
   // Call Roboflow inference API
-  const result = await callRoboflowInferenceAPI(imageDataUri);
+  const result = await callRoboflowInferenceAPI(imageDataUri, clientConfidenceThreshold);
 
   if (!result.success) {
     return {
@@ -148,7 +151,7 @@ async function handleImageAnalysis(
     }
   } else {
     const highConfidencePreds = predictions.filter(
-      (p) => p.confidence >= (config.confidenceThreshold || 0.95)
+      (p) => p.confidence >= (clientConfidenceThreshold ?? config.confidenceThreshold ?? ROBOFLOW_DEFAULTS.CONFIDENCE_THRESHOLD)
     );
 
     responseContent = `✅ Image analyzed with Roboflow model (${config.modelId ?? 'roboflow model'}).\n\n`;
@@ -165,7 +168,7 @@ async function handleImageAnalysis(
 
     if (predictions.length > highConfidencePreds.length) {
       const lowConfidencePreds = predictions.filter(
-        (p) => p.confidence < (config.confidenceThreshold || 0.95)
+        (p) => p.confidence < (clientConfidenceThreshold ?? config.confidenceThreshold ?? ROBOFLOW_DEFAULTS.CONFIDENCE_THRESHOLD)
       );
       responseContent += `\n**Lower Confidence Detections:** ${lowConfidencePreds.length}\n`;
       lowConfidencePreds.slice(0, 3).forEach((pred, idx) => {
