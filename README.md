@@ -34,6 +34,7 @@
     - [For End Users](#for-end-users)
     - [For Developers](#for-developers)
   - [🎯 Future Improvements](#-future-improvements)
+  - [🧩 Struktur Komponen](#-struktur-komponen)
   - [🙏 Acknowledgments](#-acknowledgments)
   - [📧 Contact \& Support](#-contact--support)
   - [📄 License](#-license)
@@ -200,6 +201,25 @@ console.log(results); // Array of detections with coordinates & confidence
 - [ ] Add batch processing for multiple images.
 - [ ] Integrate with live satellite data feeds (e.g., Sentinel-2).
 - [ ] Develop a mobile app for field workers.
+
+---
+
+## 🧩 Struktur Komponen
+
+Semua komponen aktif di `src/components/`:
+
+| Komponen | Digunakan di | Fungsi |
+|----------|-------------|--------|
+| `header.tsx` | `app/layout.tsx` | Sticky navbar dengan logo, navigasi Home/About, dan slot EnvCard |
+| `cards/envcard.tsx` | `src/components/header.tsx` | Banner peringatan merah jika `OPENAI_API_KEY` tidak terdeteksi |
+| `ui/button.tsx` | shadcn/ui primitive | Komponen tombol reusable berbasis Radix |
+| `ui/card.tsx` | shadcn/ui primitive | Komponen card reusable berbasis Radix |
+| `ui/icons.tsx` | shadcn/ui primitive | Kumpulan ikon SVG yang dipakai di seluruh aplikasi |
+| `ui/input.tsx` | shadcn/ui primitive | Komponen input teks reusable berbasis Radix |
+| `ui/label.tsx` | shadcn/ui primitive | Komponen label form reusable berbasis Radix |
+| `ui/switch.tsx` | shadcn/ui primitive | Komponen toggle switch reusable berbasis Radix |
+
+> Komponen utama halaman (upload gambar, chat, deteksi) diimplementasikan langsung di `app/page.tsx` sebagai route `/`.
 
 ---
 
