@@ -11,8 +11,20 @@ export const ROBOFLOW_DEFAULTS = {
 } as const;
 
 export const OPENAI_DEFAULTS = {
-  MODEL: 'gpt-3.5-turbo',
+  MODEL: "gpt-3.5-turbo",
   TEMPERATURE: 0.3,
+} as const;
+
+/**
+ * Canvas drawing constants for bounding box visualization.
+ * Used by drawBoxes.ts and BoundingBoxOverlay.tsx.
+ */
+export const CANVAS_DRAWING = {
+  LINE_WIDTH: 3,
+  LABEL_FONT_SIZE: 16,
+  LABEL_TEXT_HEIGHT: 20,
+  LABEL_PADDING: 4,
+  FILL_OPACITY_HEX: "33", // 20% opacity as hex suffix
 } as const;
 
 /**

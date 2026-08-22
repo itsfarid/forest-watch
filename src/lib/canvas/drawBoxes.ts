@@ -3,7 +3,9 @@
  * Functions for drawing bounding boxes and visualizations on canvas
  */
 
-import { RoboflowPrediction } from '@/lib/types/roboflow.types';
+import { RoboflowPrediction } from "@/lib/types/roboflow.types";
+import { logger } from "@/lib/logger";
+import { CANVAS_DRAWING } from "@/lib/config/constants";
 
 /**
  * Result of validating a single prediction
@@ -24,24 +26,38 @@ interface ValidationResult {
 export function validatePrediction(
   prediction: RoboflowPrediction,
   imageWidth: number,
-  imageHeight: number
+  imageHeight: number,
 ): ValidationResult {
   const { x, y, width, height, confidence, class: className } = prediction;
 
   // 1. Required numeric fields must exist and be finite numbers
-  for (const [field, value] of Object.entries({ x, y, width, height, confidence })) {
-    if (typeof value !== 'number' || !isFinite(value) || isNaN(value)) {
-      return { valid: false, reason: `Field "${field}" is missing, null, or not a finite number (got ${value})` };
+  for (const [field, value] of Object.entries({
+    x,
+    y,
+    width,
+    height,
+    confidence,
+  })) {
+    if (typeof value !== "number" || !isFinite(value) || isNaN(value)) {
+      return {
+        valid: false,
+        reason: `Field "${field}" is missing, null, or not a finite number (got ${value})`,
+      };
     }
   }
 
   // 2. Dimensions must be positive
-  if (width <= 0) return { valid: false, reason: `width must be > 0 (got ${width})` };
-  if (height <= 0) return { valid: false, reason: `height must be > 0 (got ${height})` };
+  if (width <= 0)
+    return { valid: false, reason: `width must be > 0 (got ${width})` };
+  if (height <= 0)
+    return { valid: false, reason: `height must be > 0 (got ${height})` };
 
   // 3. Confidence must be in [0, 1]
   if (confidence < 0 || confidence > 1) {
-    return { valid: false, reason: `confidence must be in [0, 1] (got ${confidence})` };
+    return {
+      valid: false,
+      reason: `confidence must be in [0, 1] (got ${confidence})`,
+    };
   }
 
   // 4. Box must not extend outside image bounds (x,y are CENTER coordinates)
@@ -50,14 +66,33 @@ export function validatePrediction(
   const boxRight = x + width / 2;
   const boxBottom = y + height / 2;
 
-  if (boxLeft < 0) return { valid: false, reason: `box left edge out of bounds (${boxLeft.toFixed(1)} < 0)` };
-  if (boxTop < 0) return { valid: false, reason: `box top edge out of bounds (${boxTop.toFixed(1)} < 0)` };
-  if (boxRight > imageWidth) return { valid: false, reason: `box right edge out of bounds (${boxRight.toFixed(1)} > ${imageWidth})` };
-  if (boxBottom > imageHeight) return { valid: false, reason: `box bottom edge out of bounds (${boxBottom.toFixed(1)} > ${imageHeight})` };
+  if (boxLeft < 0)
+    return {
+      valid: false,
+      reason: `box left edge out of bounds (${boxLeft.toFixed(1)} < 0)`,
+    };
+  if (boxTop < 0)
+    return {
+      valid: false,
+      reason: `box top edge out of bounds (${boxTop.toFixed(1)} < 0)`,
+    };
+  if (boxRight > imageWidth)
+    return {
+      valid: false,
+      reason: `box right edge out of bounds (${boxRight.toFixed(1)} > ${imageWidth})`,
+    };
+  if (boxBottom > imageHeight)
+    return {
+      valid: false,
+      reason: `box bottom edge out of bounds (${boxBottom.toFixed(1)} > ${imageHeight})`,
+    };
 
   // 5. Class label must be a non-empty string
-  if (typeof className !== 'string' || className.trim() === '') {
-    return { valid: false, reason: `class label is missing or empty (got ${JSON.stringify(className)})` };
+  if (typeof className !== "string" || className.trim() === "") {
+    return {
+      valid: false,
+      reason: `class label is missing or empty (got ${JSON.stringify(className)})`,
+    };
   }
 
   return { valid: true };
@@ -72,18 +107,18 @@ export function validatePrediction(
 export function drawBoxesOnCanvas(
   canvasId: string,
   imageDataUri: string,
-  predictions: RoboflowPrediction[]
+  predictions: RoboflowPrediction[],
 ): void {
   const canvas = document.getElementById(canvasId) as HTMLCanvasElement | null;
 
   if (!canvas) {
-    console.error(`Canvas with id "${canvasId}" not found`);
+    logger.error(`Canvas with id "${canvasId}" not found`);
     return;
   }
 
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext("2d");
   if (!ctx) {
-    console.error('Could not get 2D context from canvas');
+    logger.error("Could not get 2D context from canvas");
     return;
   }
 
@@ -105,10 +140,10 @@ export function drawBoxesOnCanvas(
       const result = validatePrediction(pred, img.width, img.height);
 
       if (!result.valid) {
-        console.warn(
-          `[drawBoxesOnCanvas] Skipping prediction #${idx} -- ${result.reason}`,
-          pred
-        );
+        logger.warn(`[drawBoxesOnCanvas] Skipping prediction #${idx}`, {
+          reason: result.reason,
+          prediction: pred,
+        });
         skippedCount++;
         return;
       }
@@ -119,20 +154,21 @@ export function drawBoxesOnCanvas(
 
     // Distinguish between "no predictions at all" vs "all predictions were invalid"
     if (predictions.length > 0 && validCount === 0) {
-      console.warn(
-        `[drawBoxesOnCanvas] All ${skippedCount} prediction(s) failed validation -- ` +
-        'this may indicate an unexpected API response format. No boxes drawn. ' +
-        'This is NOT the same as "no deforestation detected".'
+      logger.warn(
+        "[drawBoxesOnCanvas] All predictions failed validation -- this may indicate an unexpected API response format. This is NOT the same as no deforestation detected.",
+        { skippedCount },
       );
     } else if (skippedCount > 0) {
-      console.warn(
-        `[drawBoxesOnCanvas] Drew ${validCount} valid box(es), skipped ${skippedCount} invalid prediction(s).`
+      logger.warn(
+        `[drawBoxesOnCanvas] Drew ${validCount} valid box(es), skipped ${skippedCount} invalid prediction(s).`,
       );
     }
   };
 
   img.onerror = (error) => {
-    console.error('Failed to load image for canvas drawing:', error);
+    logger.error("Failed to load image for canvas drawing", {
+      error: String(error),
+    });
   };
 
   img.src = imageDataUri;
@@ -143,7 +179,7 @@ export function drawBoxesOnCanvas(
  */
 function drawSingleBox(
   ctx: CanvasRenderingContext2D,
-  prediction: RoboflowPrediction
+  prediction: RoboflowPrediction,
 ): void {
   const { x, y, width, height, confidence, class: className } = prediction;
 
@@ -156,7 +192,7 @@ function drawSingleBox(
 
   // Draw bounding box
   ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
+  ctx.lineWidth = CANVAS_DRAWING.LINE_WIDTH;
   ctx.strokeRect(boxX, boxY, width, height);
 
   // Draw semi-transparent fill
@@ -165,7 +201,7 @@ function drawSingleBox(
 
   // Draw label background
   const label = `${className} ${(confidence * 100).toFixed(1)}%`;
-  ctx.font = 'bold 16px Arial';
+  ctx.font = "bold 16px Arial";
   const textMetrics = ctx.measureText(label);
   const textWidth = textMetrics.width;
   const textHeight = 20;
@@ -176,11 +212,11 @@ function drawSingleBox(
     boxX,
     boxY - textHeight - padding,
     textWidth + padding * 2,
-    textHeight + padding
+    textHeight + padding,
   );
 
   // Draw label text
-  ctx.fillStyle = '#FFFFFF';
+  ctx.fillStyle = "#FFFFFF";
   ctx.fillText(label, boxX + padding, boxY - padding);
 }
 
@@ -188,9 +224,9 @@ function drawSingleBox(
  * Get color based on confidence level
  */
 function getBoxColor(confidence: number): string {
-  if (confidence >= 0.9) return '#00FF00'; // Green for high confidence
-  if (confidence >= 0.7) return '#FFA500'; // Orange for medium confidence
-  return '#FF0000'; // Red for low confidence
+  if (confidence >= 0.9) return "#00FF00"; // Green for high confidence
+  if (confidence >= 0.7) return "#FFA500"; // Orange for medium confidence
+  return "#FF0000"; // Red for low confidence
 }
 
 /**
@@ -200,11 +236,11 @@ export function clearCanvas(canvasId: string): void {
   const canvas = document.getElementById(canvasId) as HTMLCanvasElement | null;
 
   if (!canvas) {
-    console.error(`Canvas with id "${canvasId}" not found`);
+    logger.error(`clearCanvas: Canvas with id "${canvasId}" not found`);
     return;
   }
 
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext("2d");
   if (ctx) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
@@ -215,23 +251,25 @@ export function clearCanvas(canvasId: string): void {
  */
 export function downloadCanvasAsImage(
   canvasId: string,
-  filename: string = 'detection-result.png'
+  filename: string = "detection-result.png",
 ): void {
   const canvas = document.getElementById(canvasId) as HTMLCanvasElement | null;
 
   if (!canvas) {
-    console.error(`Canvas with id "${canvasId}" not found`);
+    logger.error(
+      `downloadCanvasAsImage: Canvas with id "${canvasId}" not found`,
+    );
     return;
   }
 
   canvas.toBlob((blob) => {
     if (!blob) {
-      console.error('Failed to create blob from canvas');
+      logger.error("Failed to create blob from canvas");
       return;
     }
 
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
+    const link = document.createElement("a");
     link.href = url;
     link.download = filename;
     link.click();

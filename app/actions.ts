@@ -1,17 +1,25 @@
-'use server';
+"use server";
 
 /**
  * Server Actions
  * Thin wrapper around services - handles Next.js server action orchestration
  */
 
-import { checkAIAvailability as checkAI, generateChatCompletion } from '@/lib/services/openai.service';
-import { callRoboflowInferenceAPI, isRoboflowConfigured, getRoboflowConfig } from '@/lib/services/roboflow.service';
-import { Message, ConversationResult } from '@/lib/types/message.types';
-import { AppError, openaiErrorFromException } from '@/lib/errors/api-errors';
-import { ROBOFLOW_DEFAULTS } from '@/lib/config/constants';
-import { validateImageDataUri } from '@/lib/validation/image';
-import { sanitizeTextInput } from '@/lib/validation/text';
+import {
+  checkAIAvailability as checkAI,
+  generateChatCompletion,
+} from "@/lib/services/openai.service";
+import {
+  callRoboflowInferenceAPI,
+  isRoboflowConfigured,
+  getRoboflowConfig,
+} from "@/lib/services/roboflow.service";
+import { Message, ConversationResult } from "@/lib/types/message.types";
+import { AppError, openaiErrorFromException } from "@/lib/errors/api-errors";
+import { ROBOFLOW_DEFAULTS } from "@/lib/config/constants";
+import { validateImageDataUri } from "@/lib/validation/image";
+import { sanitizeTextInput } from "@/lib/validation/text";
+import { logger } from "@/lib/logger";
 
 // Re-export types for backward compatibility
 export type { Message };
@@ -32,17 +40,17 @@ export async function checkAIAvailability(): Promise<{
  */
 export async function continueConversation(
   messages: Message[],
-  confidenceThreshold?: number
+  confidenceThreshold?: number,
 ): Promise<ConversationResult> {
   const lastMessage = messages[messages.length - 1];
-  
-  if (!lastMessage || lastMessage.role !== 'user') {
+
+  if (!lastMessage || lastMessage.role !== "user") {
     return {
       messages: [
         ...messages,
         {
-          role: 'assistant',
-          content: '⚠️ Invalid message format.',
+          role: "assistant",
+          content: "⚠️ Invalid message format.",
         },
       ],
     };
@@ -52,17 +60,23 @@ export async function continueConversation(
 
   // Check if content is a base64 image (data URI)
   const isImageDataUri =
-    typeof userContent === 'string' &&
-    (userContent.startsWith('data:image/') || userContent.startsWith('data:application/octet-stream'));
+    typeof userContent === "string" &&
+    (userContent.startsWith("data:image/") ||
+      userContent.startsWith("data:application/octet-stream"));
 
   // Check if content is a URL (http/https)
   const isImageUrl =
-    typeof userContent === 'string' &&
-    (userContent.startsWith('http://') || userContent.startsWith('https://'));
+    typeof userContent === "string" &&
+    (userContent.startsWith("http://") || userContent.startsWith("https://"));
 
   // If it's an image, process with Roboflow
   if (isImageDataUri || isImageUrl) {
-    return await handleImageAnalysis(messages, userContent, isImageUrl, confidenceThreshold);
+    return await handleImageAnalysis(
+      messages,
+      userContent,
+      isImageUrl,
+      confidenceThreshold,
+    );
   }
 
   // Otherwise, process as text chat with OpenAI
@@ -76,7 +90,7 @@ async function handleImageAnalysis(
   messages: Message[],
   imageContent: string,
   isUrl: boolean,
-  clientConfidenceThreshold?: number
+  clientConfidenceThreshold?: number,
 ): Promise<ConversationResult> {
   // Check if Roboflow is configured
   if (!isRoboflowConfigured()) {
@@ -84,9 +98,9 @@ async function handleImageAnalysis(
       messages: [
         ...messages,
         {
-          role: 'assistant',
+          role: "assistant",
           content:
-            '❌ Roboflow is not configured. Please set ROBOFLOW_API_KEY and ROBOFLOW_MODEL_ID environment variables.',
+            "❌ Roboflow is not configured. Please set ROBOFLOW_API_KEY and ROBOFLOW_MODEL_ID environment variables.",
         },
       ],
     };
@@ -103,7 +117,7 @@ async function handleImageAnalysis(
           messages: [
             ...messages,
             {
-              role: 'assistant',
+              role: "assistant",
               content: `❌ Failed to fetch image: ${fetchResult.error}`,
             },
           ],
@@ -115,8 +129,8 @@ async function handleImageAnalysis(
         messages: [
           ...messages,
           {
-            role: 'assistant',
-            content: `❌ Error fetching image: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            role: "assistant",
+            content: `❌ Error fetching image: ${error instanceof Error ? error.message : "Unknown error"}`,
           },
         ],
       };
@@ -130,7 +144,7 @@ async function handleImageAnalysis(
       messages: [
         ...messages,
         {
-          role: 'assistant',
+          role: "assistant",
           content: `❌ ${imageValidationError}`,
         },
       ],
@@ -138,15 +152,18 @@ async function handleImageAnalysis(
   }
 
   // Call Roboflow inference API
-  const result = await callRoboflowInferenceAPI(imageDataUri, clientConfidenceThreshold);
+  const result = await callRoboflowInferenceAPI(
+    imageDataUri,
+    clientConfidenceThreshold,
+  );
 
   if (!result.success) {
     return {
       messages: [
         ...messages,
         {
-          role: 'assistant',
-          content: `❌ Roboflow inference failed: ${result.error || 'Unknown error'}`,
+          role: "assistant",
+          content: `❌ Roboflow inference failed: ${result.error || "Unknown error"}`,
         },
       ],
     };
@@ -156,26 +173,31 @@ async function handleImageAnalysis(
   const predictions = result.predictions;
 
   // Build response message
-  let responseContent = '';
+  let responseContent = "";
 
   if (predictions.length === 0) {
-    responseContent = '✅ Image analyzed successfully. No deforestation detected in this image.';
-    
+    responseContent =
+      "✅ Image analyzed successfully. No deforestation detected in this image.";
+
     // In debug mode, include visualization if available
     if (result.debugInfo && result.visualization) {
       responseContent += `\n\n🔍 Debug: ${result.debugInfo}`;
     }
   } else {
     const highConfidencePreds = predictions.filter(
-      (p) => p.confidence >= (clientConfidenceThreshold ?? config.confidenceThreshold ?? ROBOFLOW_DEFAULTS.CONFIDENCE_THRESHOLD)
+      (p) =>
+        p.confidence >=
+        (clientConfidenceThreshold ??
+          config.confidenceThreshold ??
+          ROBOFLOW_DEFAULTS.CONFIDENCE_THRESHOLD),
     );
 
-    responseContent = `✅ Image analyzed with Roboflow model (${config.modelId ?? 'roboflow model'}).\n\n`;
+    responseContent = `✅ Image analyzed with Roboflow model (${config.modelId ?? "roboflow model"}).\n\n`;
     responseContent += `**Detections Found:** ${predictions.length}\n`;
     responseContent += `**High Confidence:** ${highConfidencePreds.length}\n\n`;
 
     if (highConfidencePreds.length > 0) {
-      responseContent += '**High Confidence Detections:**\n';
+      responseContent += "**High Confidence Detections:**\n";
       highConfidencePreds.forEach((pred, idx) => {
         responseContent += `${idx + 1}. ${pred.class} - ${(pred.confidence * 100).toFixed(1)}% confidence\n`;
         responseContent += `   Location: (${Math.round(pred.x)}, ${Math.round(pred.y)}), Size: ${Math.round(pred.width)}x${Math.round(pred.height)}\n`;
@@ -184,7 +206,11 @@ async function handleImageAnalysis(
 
     if (predictions.length > highConfidencePreds.length) {
       const lowConfidencePreds = predictions.filter(
-        (p) => p.confidence < (clientConfidenceThreshold ?? config.confidenceThreshold ?? ROBOFLOW_DEFAULTS.CONFIDENCE_THRESHOLD)
+        (p) =>
+          p.confidence <
+          (clientConfidenceThreshold ??
+            config.confidenceThreshold ??
+            ROBOFLOW_DEFAULTS.CONFIDENCE_THRESHOLD),
       );
       responseContent += `\n**Lower Confidence Detections:** ${lowConfidencePreds.length}\n`;
       lowConfidencePreds.slice(0, 3).forEach((pred, idx) => {
@@ -199,7 +225,7 @@ async function handleImageAnalysis(
   }
 
   const assistantMessage: Message = {
-    role: 'assistant',
+    role: "assistant",
     content: responseContent,
     imageUrl: result.visualization || imageDataUri,
     predictions: predictions.length > 0 ? predictions : undefined,
@@ -213,35 +239,39 @@ async function handleImageAnalysis(
 /**
  * Handle text chat using OpenAI
  */
-async function handleTextChat(messages: Message[]): Promise<ConversationResult> {
+async function handleTextChat(
+  messages: Message[],
+): Promise<ConversationResult> {
   try {
     // Sanitize user messages before sending to OpenAI
     const formattedMessages = messages.map((msg) => ({
       role: msg.role,
-      content: msg.role === 'user' ? sanitizeTextInput(msg.content) : msg.content,
+      content:
+        msg.role === "user" ? sanitizeTextInput(msg.content) : msg.content,
     }));
 
     const responseContent = await generateChatCompletion(formattedMessages);
 
     const assistantMessage: Message = {
-      role: 'assistant',
-      content: responseContent || '⚠️ No response generated.',
+      role: "assistant",
+      content: responseContent || "⚠️ No response generated.",
     };
 
     return {
       messages: [...messages, assistantMessage],
     };
   } catch (error) {
-    const appErr = error instanceof AppError
-      ? error
-      : openaiErrorFromException(error);
-    console.error('continueConversation text chat error:', appErr.technicalMessage);
+    const appErr =
+      error instanceof AppError ? error : openaiErrorFromException(error);
+    logger.error("continueConversation text chat error", {
+      technical: appErr.technicalMessage,
+    });
 
     return {
       messages: [
         ...messages,
         {
-          role: 'assistant',
+          role: "assistant",
           content: `❌ ${appErr.userMessage}`,
         },
       ],
@@ -259,7 +289,7 @@ async function fetchImageAsDataUri(url: string): Promise<{
 }> {
   try {
     const response = await fetch(url);
-    
+
     if (!response.ok) {
       return {
         success: false,
@@ -267,16 +297,16 @@ async function fetchImageAsDataUri(url: string): Promise<{
       };
     }
 
-    const contentType = response.headers.get('content-type');
-    if (!contentType?.startsWith('image/')) {
+    const contentType = response.headers.get("content-type");
+    if (!contentType?.startsWith("image/")) {
       return {
         success: false,
-        error: 'URL does not point to an image',
+        error: "URL does not point to an image",
       };
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
     const dataUri = `data:${contentType};base64,${base64}`;
 
     return {
@@ -286,7 +316,7 @@ async function fetchImageAsDataUri(url: string): Promise<{
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to fetch image',
+      error: error instanceof Error ? error.message : "Failed to fetch image",
     };
   }
 }

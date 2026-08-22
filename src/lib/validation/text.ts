@@ -15,18 +15,22 @@ const MAX_TEXT_LENGTH = 1000;
  * Returns the sanitized string, or throws if input is fundamentally invalid.
  */
 export function sanitizeTextInput(text: string): string {
-  if (typeof text !== 'string') {
-    throw new Error('Input must be a string.');
+  if (typeof text !== "string") {
+    throw new Error("Input must be a string.");
   }
 
   // Trim whitespace
   let sanitized = text.trim();
 
-  // Strip HTML/script tags -- prevents injection if output is ever rendered as HTML
-  sanitized = sanitized.replace(/<[^>]*>/g, '');
+  // Strip script and style tag content entirely (not just the tags)
+  sanitized = sanitized.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  sanitized = sanitized.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+
+  // Strip remaining HTML tags (keep text content of other tags like <b>, <i>)
+  sanitized = sanitized.replace(/<[^>]*>/g, "");
 
   // Collapse multiple whitespace into single spaces after stripping tags
-  sanitized = sanitized.replace(/\s+/g, ' ').trim();
+  sanitized = sanitized.replace(/\s+/g, " ").trim();
 
   // Truncate if over max length (prefer truncate over reject for UX)
   if (sanitized.length > MAX_TEXT_LENGTH) {

@@ -3,10 +3,11 @@
  * Handles all OpenAI API interactions
  */
 
-import OpenAI from 'openai';
-import { OPENAI_DEFAULTS } from '@/lib/config/constants';
-import { openaiErrorFromException } from '@/lib/errors/api-errors';
-import { validateOpenAIEnv } from '@/lib/config/env';
+import OpenAI from "openai";
+import { OPENAI_DEFAULTS } from "@/lib/config/constants";
+import { openaiErrorFromException } from "@/lib/errors/api-errors";
+import { validateOpenAIEnv } from "@/lib/config/env";
+import { logger } from "@/lib/logger";
 
 // Validate required env vars at module load time
 validateOpenAIEnv();
@@ -20,9 +21,9 @@ let openaiClient: OpenAI | null = null;
 export function getOpenAIClient(): OpenAI {
   if (!openaiClient) {
     const apiKey = process.env.OPENAI_API_KEY;
-    
+
     if (!apiKey) {
-      throw new Error('OPENAI_API_KEY is not configured');
+      throw new Error("OPENAI_API_KEY is not configured");
     }
 
     openaiClient = new OpenAI({ apiKey });
@@ -41,17 +42,19 @@ export async function checkAIAvailability(): Promise<{
   try {
     const client = getOpenAIClient();
     await client.models.list();
-    
-    return {
-      available: true,
-      message: 'AI service is online',
-    };
-  } catch (error) {
-    console.error('AI availability check failed:', error);
-    
+
     return {
       available: false,
-      message: 'AI service is unavailable',
+      message: "AI service is unavailable",
+    };
+  } catch (error) {
+    logger.error("AI availability check failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return {
+      available: false,
+      message: "AI service is unavailable",
     };
   }
 }
@@ -60,11 +63,11 @@ export async function checkAIAvailability(): Promise<{
  * Generate chat completion using OpenAI
  */
 export async function generateChatCompletion(
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
   options?: {
     model?: string;
     temperature?: number;
-  }
+  },
 ): Promise<string> {
   const client = getOpenAIClient();
 
@@ -75,7 +78,7 @@ export async function generateChatCompletion(
       temperature: options?.temperature ?? OPENAI_DEFAULTS.TEMPERATURE,
     });
 
-    return response.choices[0]?.message?.content ?? '';
+    return response.choices[0]?.message?.content ?? "";
   } catch (error) {
     throw openaiErrorFromException(error);
   }
