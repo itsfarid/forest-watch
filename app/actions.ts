@@ -1,400 +1,216 @@
 'use server';
 
-import OpenAI from 'openai';
+/**
+ * Server Actions
+ * Thin wrapper around services - handles Next.js server action orchestration
+ */
 
-/* =========================
-   Types
-   ========================= */
-export type Message = {
-  role: 'user' | 'assistant';
-  content: string;
-  imageUrl?: string;
-};
+import { checkAIAvailability as checkAI, generateChatCompletion } from '@/lib/services/openai.service';
+import { callRoboflowInferenceAPI, isRoboflowConfigured, getRoboflowConfig } from '@/lib/services/roboflow.service';
+import { Message, ConversationResult } from '@/lib/types/message.types';
 
-/* =========================
-   OpenAI Client (dipakai sebagai fallback untuk text chat)
-   ========================= */
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+// Re-export types for backward compatibility
+export type { Message };
 
-/* =========================
-   Check AI Availability (exported because UI imports it)
-   ========================= */
+/**
+ * Check if AI service (OpenAI) is available
+ */
 export async function checkAIAvailability(): Promise<{
   available: boolean;
   message: string;
 }> {
-  try {
-    await openai.models.list();
-    return {
-      available: true,
-      message: 'AI service is online',
-    };
-  } catch (error) {
-    console.error('AI availability check failed:', error);
-    return {
-      available: false,
-      message: 'AI service is unavailable',
-    };
-  }
-}
-
-/* =========================
-   Roboflow settings (env)
-   ========================= */
-const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY;
-const ROBOFLOW_MODEL_ID = process.env.ROBOFLOW_MODEL_ID;
-const ROBOFLOW_INFERENCE_URL = process.env.ROBOFLOW_INFERENCE_URL;
-const ROBOFLOW_DETECT_MODEL = process.env.ROBOFLOW_DETECT_MODEL || ROBOFLOW_MODEL_ID;
-const ROBOFLOW_DEBUG = process.env.ROBOFLOW_DEBUG === 'true';
-
-/* =========================
-   Helpers
-   ========================= */
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-function roboflowSafeCheck() {
-  return Boolean(
-    ROBOFLOW_API_KEY &&
-      (ROBOFLOW_MODEL_ID || ROBOFLOW_INFERENCE_URL || ROBOFLOW_DETECT_MODEL)
-  );
-}
-
-function safeModelPath(id: string) {
-  return id
-    .split('/')
-    .map((seg) => encodeURIComponent(seg))
-    .join('/');
-}
-
-function extractPredictionsFromResponse(rfResponse: any): any[] {
-  if (!rfResponse) return [];
-  if (Array.isArray(rfResponse.predictions)) return rfResponse.predictions;
-  if (Array.isArray(rfResponse?.outputs?.[0]?.predictions)) return rfResponse.outputs[0].predictions;
-  if (Array.isArray(rfResponse?.results?.[0]?.predictions)) return rfResponse.results[0].predictions;
-  if (Array.isArray(rfResponse?.data?.predictions)) return rfResponse.data.predictions;
-  
-  const findPreds = (obj: any): any[] | null => {
-    if (!obj || typeof obj !== 'object') return null;
-    if (Array.isArray(obj.predictions)) return obj.predictions;
-    for (const k of Object.keys(obj)) {
-      const val = obj[k];
-      if (val && typeof val === 'object') {
-        const nested = findPreds(val);
-        if (nested) return nested;
-      }
-    }
-    return null;
-  };
-  const nested = findPreds(rfResponse);
-  return Array.isArray(nested) ? nested : [];
+  return checkAI();
 }
 
 /**
- * [FIXED] Fungsi ini sekarang memvalidasi tipe data.
- * Mencegah object metadata (seperti {width:800}) dianggap sebagai string gambar.
+ * Continue conversation with AI
+ * Handles both image analysis (via Roboflow) and text chat (via OpenAI)
  */
-function annotatedImageFromResponse(rfResponse: any): string | null {
-  const candidate = rfResponse?.image ?? rfResponse?.annotated ?? rfResponse?.output_image ?? rfResponse?.annotated_image ?? null;
-  
-  // Hanya return jika tipe-nya string dan cukup panjang (valid base64/url)
-  if (typeof candidate === 'string' && candidate.length > 100) {
-    return candidate;
-  }
-  return null;
-}
-
-/* =========================
-   Convert dataURL -> Buffer & mime
-   ========================= */
-function dataUrlToBuffer(dataUrl: string) {
-  const match = dataUrl.match(/^data:([^;]+);.*base64,(.+)$/);
-  if (!match) throw new Error('Invalid data URL');
-  const mime = match[1];
-  const base64 = match[2];
-  const buffer = Buffer.from(base64, 'base64');
-  return { buffer, mime };
-}
-
-/* =========================
-   Analyze image with Roboflow
-   ========================= */
-async function analyzeImageWithRoboflow(base64DataUrl: string) {
-  if (!roboflowSafeCheck()) {
-    throw new Error('Roboflow environment variables not configured.');
-  }
-
-  const maskKey = (k?: string) => (k ? `${k.slice(0, 8)}...` : '<<<no-key>>>');
-
-  // 1) Serverless Workflow (Prioritas jika ENV ada)
-  if (ROBOFLOW_INFERENCE_URL) {
-    try {
-      console.log('[Roboflow] Attempting serverless workflow inference at:', ROBOFLOW_INFERENCE_URL);
-      console.log('[Roboflow] api key preview:', maskKey(ROBOFLOW_API_KEY));
-
-      const body = {
-        api_key: ROBOFLOW_API_KEY,
-        inputs: {
-          image: {
-            type: 'base64',
-            value: base64DataUrl,
-          },
-        },
-      };
-
-      const resp = await fetch(ROBOFLOW_INFERENCE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      const text = await resp.text();
-      let json: any = null;
-      try {
-        json = JSON.parse(text);
-      } catch (e) {
-        json = null;
-      }
-
-      console.log('[Roboflow] serverless attempt status:', resp.status, 'body-snippet:', text.slice(0, 2000));
-
-      const preds = extractPredictionsFromResponse(json);
-      if (Array.isArray(preds) && preds.length > 0) {
-        if (ROBOFLOW_DEBUG) console.log('[Roboflow] serverless response preview:', JSON.stringify(json).slice(0, 4000));
-        return json;
-      }
-
-      if (json && json.message) {
-        console.log('[Roboflow] serverless message:', json.message);
-      } else {
-        console.log('[Roboflow] serverless returned no predictions, falling back to other endpoints.');
-      }
-    } catch (err) {
-      console.error('[Roboflow] serverless attempt failed:', err);
-    }
-  } else {
-    console.log('[Roboflow] No ROBOFLOW_INFERENCE_URL configured, skipping serverless workflow attempt.');
-  }
-
-  // 2) JSON Infer Endpoint
-  let jsonUrl = null;
-  if (ROBOFLOW_MODEL_ID) {
-    jsonUrl = `https://api.roboflow.com/${safeModelPath(ROBOFLOW_MODEL_ID)}/infer?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`;
-  }
-
-  if (jsonUrl) {
-    try {
-      console.log('[Roboflow] Attempting JSON infer at:', jsonUrl.replace(/(api_key=)[^&]+/, '$1<<<masked>>>'));
-      const resp = await fetch(jsonUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64DataUrl }),
-      });
-
-      const contentType = resp.headers.get('content-type') ?? '';
-      let json: any = null;
-      if (contentType.includes('application/json')) {
-        try {
-          json = await resp.json();
-        } catch (e) {
-          json = null;
-        }
-      } else {
-        const txt = await resp.text();
-        console.log('[Roboflow] JSON infer non-json response (status):', resp.status, 'body-snippet:', txt.slice(0, 2000));
-      }
-
-      console.log('[Roboflow] JSON attempt status:', resp.status, 'jsonKeys:', json ? Object.keys(json) : 'no-json');
-
-      const preds = extractPredictionsFromResponse(json);
-      if (Array.isArray(preds) && preds.length > 0) {
-        if (ROBOFLOW_DEBUG) console.log('[Roboflow] JSON response preview:', JSON.stringify(json).slice(0, 4000));
-        return json;
-      }
-
-      console.log('[Roboflow] JSON-response had no predictions, will try multipart fallback...');
-    } catch (err) {
-      console.error('[Roboflow] JSON attempt failed:', err);
-    }
-  } else {
-    console.log('[Roboflow] No ROBOFLOW_MODEL_ID configured, skipping JSON infer attempt.');
-  }
-
-  // 3) Multipart Fallback (Direct API)
-  const DETECT_MODEL = ROBOFLOW_DETECT_MODEL;
-  if (!DETECT_MODEL) {
-    throw new Error('Roboflow detect model not configured (ROBOFLOW_DETECT_MODEL or ROBOFLOW_MODEL_ID missing).');
-  }
-
-  try {
-    const { buffer, mime } = dataUrlToBuffer(base64DataUrl);
-    const form = new FormData();
-    try {
-      // @ts-ignore
-      const blob = typeof Blob !== 'undefined' ? new Blob([buffer], { type: mime }) : null;
-      if (blob) {
-        // @ts-ignore
-        form.append('file', blob, 'upload.jpg');
-      } else {
-        // @ts-ignore
-        form.append('file', buffer, { filename: 'upload.jpg', contentType: mime });
-      }
-    } catch (e) {
-      // @ts-ignore
-      form.append('file', buffer, { filename: 'upload.jpg', contentType: mime });
-    }
-
-    const detectUrl = `https://detect.roboflow.com/${safeModelPath(DETECT_MODEL)}?api_key=${encodeURIComponent(ROBOFLOW_API_KEY!)}`;
-    console.log('[Roboflow] multipart detectUrl:', detectUrl.replace(/(api_key=)[^&]+/, '$1<<<masked>>>'));
-
-    const r2 = await fetch(detectUrl, {
-      method: 'POST',
-      body: form as any,
-    });
-
-    const ct2 = r2.headers.get('content-type') ?? '';
-    let json2: any = null;
-    if (ct2.includes('application/json')) {
-      try {
-        json2 = await r2.json();
-      } catch (e) {
-        console.error('[Roboflow] multipart returned invalid json:', e);
-      }
-    } else {
-      const text = await r2.text();
-      console.log('[Roboflow] multipart non-json response (status):', r2.status, 'body-snippet:', text.slice(0, 2000));
-    }
-
-    console.log('[Roboflow] multipart attempt status:', r2.status, 'jsonKeys:', json2 ? Object.keys(json2) : 'no-json');
-
-    if (ROBOFLOW_DEBUG && json2) {
-      console.log('[Roboflow] multipart response preview:', JSON.stringify(json2).slice(0, 4000));
-    }
-
-    return json2;
-  } catch (err) {
-    console.error('[Roboflow] multipart fallback failed:', err);
-    throw err;
-  }
-}
-
-/* =========================
-   Continue Conversation
-   ========================= */
 export async function continueConversation(
   messages: Message[]
-): Promise<{ messages: Message[] }> {
-  if (!messages || messages.length === 0) {
-    return { messages };
+): Promise<ConversationResult> {
+  const lastMessage = messages[messages.length - 1];
+  
+  if (!lastMessage || lastMessage.role !== 'user') {
+    return {
+      messages: [
+        ...messages,
+        {
+          role: 'assistant',
+          content: '⚠️ Invalid message format.',
+        },
+      ],
+    };
   }
 
-  const last = messages[messages.length - 1];
+  const userContent = lastMessage.content;
 
-  // Handle base64 image data
-  if (last.role === 'user' && typeof last.content === 'string' && last.content.startsWith('data:image')) {
-    try {
-      const rfResponse = await analyzeImageWithRoboflow(last.content);
+  // Check if content is a base64 image (data URI)
+  const isImageDataUri =
+    typeof userContent === 'string' &&
+    (userContent.startsWith('data:image/') || userContent.startsWith('data:application/octet-stream'));
 
-      // Robust extraction of predictions
-      const predictions: Array<{ confidence?: number; class?: string }> = extractPredictionsFromResponse(rfResponse);
+  // Check if content is a URL (http/https)
+  const isImageUrl =
+    typeof userContent === 'string' &&
+    (userContent.startsWith('http://') || userContent.startsWith('https://'));
 
-      const total = predictions.length;
-      const avgConf = total > 0 ? predictions.reduce((s, p) => s + (p.confidence ?? 0), 0) / total : 0;
+  // If it's an image, process with Roboflow
+  if (isImageDataUri || isImageUrl) {
+    return await handleImageAnalysis(messages, userContent, isImageUrl);
+  }
 
-      const top = predictions
-        .slice()
-        .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
-        .slice(0, 5)
-        .map((p) => ({
-          class: p.class ?? 'unknown',
-          confidence: (p.confidence ?? 0) * 100,
-        }));
+  // Otherwise, process as text chat with OpenAI
+  return await handleTextChat(messages);
+}
 
-      const annotatedImageUrl = annotatedImageFromResponse(rfResponse);
-
-      // Debug View
-      if ((!predictions || predictions.length === 0) && ROBOFLOW_DEBUG) {
-        const raw = typeof rfResponse === 'string' ? rfResponse : JSON.stringify(rfResponse, null, 2);
-        const assistantMessage: Message = {
+/**
+ * Handle image analysis using Roboflow
+ */
+async function handleImageAnalysis(
+  messages: Message[],
+  imageContent: string,
+  isUrl: boolean
+): Promise<ConversationResult> {
+  // Check if Roboflow is configured
+  if (!isRoboflowConfigured()) {
+    return {
+      messages: [
+        ...messages,
+        {
           role: 'assistant',
-          content: `🔎 Roboflow response (debug):\n\n${raw.slice(0, 3000)}\n\n(End preview)`,
+          content:
+            '❌ Roboflow is not configured. Please set ROBOFLOW_API_KEY and ROBOFLOW_MODEL_ID environment variables.',
+        },
+      ],
+    };
+  }
+
+  let imageDataUri = imageContent;
+
+  // If it's a URL, fetch and convert to data URI
+  if (isUrl) {
+    try {
+      const fetchResult = await fetchImageAsDataUri(imageContent);
+      if (!fetchResult.success) {
+        return {
+          messages: [
+            ...messages,
+            {
+              role: 'assistant',
+              content: `❌ Failed to fetch image: ${fetchResult.error}`,
+            },
+          ],
         };
-        return { messages: [...messages, assistantMessage] };
       }
-
-      const assistantContentLines: string[] = [
-        `✅ Image analyzed with Roboflow model (${ROBOFLOW_MODEL_ID ?? 'roboflow model'}).`,
-        `Detections: ${total}`,
-        `Average confidence: ${Math.round(avgConf * 10000) / 100} %`,
-        '',
-      ];
-
-      if (top.length > 0) {
-        assistantContentLines.push('Top detections:');
-        top.forEach((t, i) => {
-          assistantContentLines.push(`${i + 1}. ${t.class} — ${t.confidence.toFixed(1)}%`);
-        });
-      } else {
-        assistantContentLines.push('No objects detected above threshold.');
-      }
-
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: assistantContentLines.join('\n'),
-      };
-
-      if (annotatedImageUrl) {
-        assistantMessage.imageUrl = annotatedImageUrl;
-      } else {
-        assistantMessage.imageUrl = last.content;
-      }
-
-      return {
-        messages: [...messages, assistantMessage],
-      };
-    } catch (err: any) {
-      console.error('Roboflow analysis failed:', err);
-
+      imageDataUri = fetchResult.dataUri!;
+    } catch (error) {
       return {
         messages: [
           ...messages,
           {
             role: 'assistant',
-            content:
-              '❌ Image analysis with Roboflow failed. Please check your Roboflow API key, model id, and that the inference endpoint is reachable. ' +
-              (err?.message ? `Error: ${err.message}` : ''),
+            content: `❌ Error fetching image: ${error instanceof Error ? error.message : 'Unknown error'}`,
           },
         ],
       };
     }
   }
 
-  // Fallback: OpenAI chat completion for text
+  // Call Roboflow inference API
+  const result = await callRoboflowInferenceAPI(imageDataUri);
+
+  if (!result.success) {
+    return {
+      messages: [
+        ...messages,
+        {
+          role: 'assistant',
+          content: `❌ Roboflow inference failed: ${result.error || 'Unknown error'}`,
+        },
+      ],
+    };
+  }
+
+  const config = getRoboflowConfig();
+  const predictions = result.predictions;
+
+  // Build response message
+  let responseContent = '';
+
+  if (predictions.length === 0) {
+    responseContent = '✅ Image analyzed successfully. No deforestation detected in this image.';
+    
+    // In debug mode, include visualization if available
+    if (result.debugInfo && result.visualization) {
+      responseContent += `\n\n🔍 Debug: ${result.debugInfo}`;
+    }
+  } else {
+    const highConfidencePreds = predictions.filter(
+      (p) => p.confidence >= (config.confidenceThreshold || 0.95)
+    );
+
+    responseContent = `✅ Image analyzed with Roboflow model (${config.modelId ?? 'roboflow model'}).\n\n`;
+    responseContent += `**Detections Found:** ${predictions.length}\n`;
+    responseContent += `**High Confidence:** ${highConfidencePreds.length}\n\n`;
+
+    if (highConfidencePreds.length > 0) {
+      responseContent += '**High Confidence Detections:**\n';
+      highConfidencePreds.forEach((pred, idx) => {
+        responseContent += `${idx + 1}. ${pred.class} - ${(pred.confidence * 100).toFixed(1)}% confidence\n`;
+        responseContent += `   Location: (${Math.round(pred.x)}, ${Math.round(pred.y)}), Size: ${Math.round(pred.width)}x${Math.round(pred.height)}\n`;
+      });
+    }
+
+    if (predictions.length > highConfidencePreds.length) {
+      const lowConfidencePreds = predictions.filter(
+        (p) => p.confidence < (config.confidenceThreshold || 0.95)
+      );
+      responseContent += `\n**Lower Confidence Detections:** ${lowConfidencePreds.length}\n`;
+      lowConfidencePreds.slice(0, 3).forEach((pred, idx) => {
+        responseContent += `${idx + 1}. ${pred.class} - ${(pred.confidence * 100).toFixed(1)}%\n`;
+      });
+      if (lowConfidencePreds.length > 3) {
+        responseContent += `... and ${lowConfidencePreds.length - 3} more\n`;
+      }
+    }
+
+    responseContent += `\n💡 **Tip:** Draw bounding boxes on a canvas element using the provided coordinates.`;
+  }
+
+  const assistantMessage: Message = {
+    role: 'assistant',
+    content: responseContent,
+    imageUrl: result.visualization || imageDataUri,
+  };
+
+  return {
+    messages: [...messages, assistantMessage],
+  };
+}
+
+/**
+ * Handle text chat using OpenAI
+ */
+async function handleTextChat(messages: Message[]): Promise<ConversationResult> {
   try {
     const formattedMessages = messages.map((msg) => ({
       role: msg.role,
       content: msg.content,
     }));
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: formattedMessages,
-      temperature: 0.3,
-    });
+    const responseContent = await generateChatCompletion(formattedMessages);
 
     const assistantMessage: Message = {
       role: 'assistant',
-      content: response.choices[0]?.message?.content ?? '⚠️ No response generated.',
+      content: responseContent || '⚠️ No response generated.',
     };
 
     return {
       messages: [...messages, assistantMessage],
     };
   } catch (error) {
-    console.error('continueConversation fallback error:', error);
+    console.error('continueConversation text chat error:', error);
 
     return {
       messages: [
@@ -405,6 +221,48 @@ export async function continueConversation(
             '❌ Failed to process request. Please check API key(s) and server logs, or try again later.',
         },
       ],
+    };
+  }
+}
+
+/**
+ * Fetch image from URL and convert to data URI
+ */
+async function fetchImageAsDataUri(url: string): Promise<{
+  success: boolean;
+  dataUri?: string;
+  error?: string;
+}> {
+  try {
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      return {
+        success: false,
+        error: `HTTP ${response.status}: ${response.statusText}`,
+      };
+    }
+
+    const contentType = response.headers.get('content-type');
+    if (!contentType?.startsWith('image/')) {
+      return {
+        success: false,
+        error: 'URL does not point to an image',
+      };
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const dataUri = `data:${contentType};base64,${base64}`;
+
+    return {
+      success: true,
+      dataUri,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch image',
     };
   }
 }

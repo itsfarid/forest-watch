@@ -1,4 +1,4 @@
-import { checkAIAvailability } from "@/app/actions";
+import { checkAIAvailability } from '@/app/actions';
 
 export default async function EnvCard() {
   const result = await checkAIAvailability();

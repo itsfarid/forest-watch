@@ -1,0 +1,73 @@
+/**
+ * OpenAI Service
+ * Handles all OpenAI API interactions
+ */
+
+import OpenAI from 'openai';
+import { OPENAI_DEFAULTS } from '@/lib/config/constants';
+
+// Singleton OpenAI client instance
+let openaiClient: OpenAI | null = null;
+
+/**
+ * Get or create OpenAI client instance
+ */
+export function getOpenAIClient(): OpenAI {
+  if (!openaiClient) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY is not configured');
+    }
+
+    openaiClient = new OpenAI({ apiKey });
+  }
+
+  return openaiClient;
+}
+
+/**
+ * Check if OpenAI API is available and accessible
+ */
+export async function checkAIAvailability(): Promise<{
+  available: boolean;
+  message: string;
+}> {
+  try {
+    const client = getOpenAIClient();
+    await client.models.list();
+    
+    return {
+      available: true,
+      message: 'AI service is online',
+    };
+  } catch (error) {
+    console.error('AI availability check failed:', error);
+    
+    return {
+      available: false,
+      message: 'AI service is unavailable',
+    };
+  }
+}
+
+/**
+ * Generate chat completion using OpenAI
+ */
+export async function generateChatCompletion(
+  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+  options?: {
+    model?: string;
+    temperature?: number;
+  }
+): Promise<string> {
+  const client = getOpenAIClient();
+
+  const response = await client.chat.completions.create({
+    model: options?.model || OPENAI_DEFAULTS.MODEL,
+    messages,
+    temperature: options?.temperature ?? OPENAI_DEFAULTS.TEMPERATURE,
+  });
+
+  return response.choices[0]?.message?.content ?? '';
+}
