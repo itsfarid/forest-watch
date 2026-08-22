@@ -202,6 +202,7 @@ async function handleImageAnalysis(
     role: 'assistant',
     content: responseContent,
     imageUrl: result.visualization || imageDataUri,
+    predictions: predictions.length > 0 ? predictions : undefined,
   };
 
   return {

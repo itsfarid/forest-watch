@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { IconArrowUp } from '@/components/ui/icons';
 import { IMAGE_COMPRESSION } from '@/lib/config/constants';
+import { BoundingBoxOverlay } from '@/components/BoundingBoxOverlay';
 
 const CONFIDENCE_DEFAULT = 0.5;
 const CONFIDENCE_STORAGE_KEY = 'fw_confidence_threshold';
@@ -198,11 +199,19 @@ export default function Home() {
                   <>
                     {message.imageUrl && (
                       <div className="mb-3 rounded-md overflow-hidden border border-gray-300">
-                        <img 
-                          src={message.imageUrl} 
-                          alt="Analyzed" 
-                          className="w-full h-auto object-contain max-h-60" 
-                        />
+                        {message.predictions && message.predictions.length > 0 ? (
+                          <BoundingBoxOverlay
+                            imageUrl={message.imageUrl}
+                            predictions={message.predictions}
+                            alt="Analyzed"
+                          />
+                        ) : (
+                          <img
+                            src={message.imageUrl}
+                            alt="Analyzed"
+                            className="w-full h-auto object-contain max-h-60"
+                          />
+                        )}
                       </div>
                     )}
                     <div>{message.content}</div>
