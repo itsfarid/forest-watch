@@ -40,3 +40,12 @@ export const IMAGE_COMPRESSION = {
   /** Client-side submit timeout in ms (55s -- just under Vercel's 60s function limit) */
   SUBMIT_TIMEOUT_MS: 55000,
 } as const;
+
+export const RATE_LIMIT_DEFAULTS = {
+  MAX_REQUESTS: 5,
+  WINDOW_MS: 60000, // 60 seconds
+} as const;
+
+export const TEXT_CHAT_DEFAULTS = {
+  MAX_TEXT_LENGTH: 1000,
+} as const;

@@ -16,10 +16,11 @@ import {
 } from "@/lib/services/roboflow.service";
 import { Message, ConversationResult } from "@/lib/types/message.types";
 import { AppError, openaiErrorFromException } from "@/lib/errors/api-errors";
-import { ROBOFLOW_DEFAULTS } from "@/lib/config/constants";
+import { ROBOFLOW_DEFAULTS, TEXT_CHAT_DEFAULTS } from "@/lib/config/constants";
 import { validateImageDataUri } from "@/lib/validation/image";
 import { sanitizeTextInput } from "@/lib/validation/text";
 import { logger } from "@/lib/logger";
+import { defaultRateLimiter, getClientIp } from "@/lib/security/rate-limiter";
 
 // Re-export types for backward compatibility
 export type { Message };
@@ -61,6 +62,24 @@ export async function continueConversation(
         {
           role: "assistant",
           content: "⚠️ Invalid message format.",
+        },
+      ],
+    };
+  }
+
+  // Check rate limit before performing expensive processing or calling external APIs
+  const clientIp = getClientIp();
+  const rateLimitResult = defaultRateLimiter.checkRateLimit(clientIp);
+
+  if (!rateLimitResult.allowed) {
+    logger.warn("Rate limit exceeded", { ip: clientIp });
+    return {
+      messages: [
+        ...trimmedMessages,
+        {
+          role: "assistant",
+          content:
+            "❌ Too many requests. Please wait a minute before trying again.",
         },
       ],
     };
@@ -252,6 +271,22 @@ async function handleImageAnalysis(
 async function handleTextChat(
   messages: Message[],
 ): Promise<ConversationResult> {
+  const lastUserMsg = messages[messages.length - 1];
+  if (
+    typeof lastUserMsg?.content === "string" &&
+    lastUserMsg.content.length > TEXT_CHAT_DEFAULTS.MAX_TEXT_LENGTH
+  ) {
+    return {
+      messages: [
+        ...messages,
+        {
+          role: "assistant",
+          content: `❌ Text message is too long (maximum ${TEXT_CHAT_DEFAULTS.MAX_TEXT_LENGTH} characters allowed).`,
+        },
+      ],
+    };
+  }
+
   try {
     // Sanitize user messages and wrap with delimiters to mitigate prompt injection
     const formattedMessages = messages.map((msg) => {
