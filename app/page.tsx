@@ -61,7 +61,9 @@ export default function Home() {
     if (typeof window === "undefined") return CONFIDENCE_DEFAULT;
     const stored = localStorage.getItem(CONFIDENCE_STORAGE_KEY);
     const parsed = stored ? parseFloat(stored) : NaN;
-    return isNaN(parsed) ? CONFIDENCE_DEFAULT : parsed;
+    // Clamp to valid range to prevent tampered localStorage values
+    if (isNaN(parsed)) return CONFIDENCE_DEFAULT;
+    return Math.min(1, Math.max(0.1, parsed));
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 

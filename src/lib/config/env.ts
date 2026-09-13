@@ -16,8 +16,8 @@
  */
 export function validateEnv(): void {
   const required: Record<string, string> = {
-    OPENAI_API_KEY: 'OpenAI API key for chat completion',
-    ROBOFLOW_API_KEY: 'Roboflow API key for inference',
+    OPENAI_API_KEY: "OpenAI API key for chat completion",
+    ROBOFLOW_API_KEY: "Roboflow API key for inference",
   };
 
   // At least one Roboflow target must be configured
@@ -37,15 +37,23 @@ export function validateEnv(): void {
 
   if (roboflowTargets.length === 0) {
     missing.push(
-      '  - ROBOFLOW_MODEL_ID / ROBOFLOW_INFERENCE_URL / ROBOFLOW_DETECT_MODEL: ' +
-      'at least one Roboflow inference target must be set'
+      "  - ROBOFLOW_MODEL_ID / ROBOFLOW_INFERENCE_URL / ROBOFLOW_DETECT_MODEL: " +
+        "at least one Roboflow inference target must be set",
+    );
+  }
+
+  // If ROBOFLOW_INFERENCE_URL is set, it must use HTTPS to prevent downgrade attacks
+  const inferenceUrl = process.env.ROBOFLOW_INFERENCE_URL;
+  if (inferenceUrl && !inferenceUrl.startsWith("https://")) {
+    missing.push(
+      "  - ROBOFLOW_INFERENCE_URL: must use HTTPS (currently set to non-HTTPS URL)",
     );
   }
 
   if (missing.length > 0) {
     throw new Error(
-      `Missing required environment variables:\n${missing.join('\n')}\n\n` +
-      'Copy .env.example to .env.local and fill in the values.'
+      `Missing required environment variables:\n${missing.join("\n")}\n\n` +
+        "Copy .env.example to .env.local and fill in the values.",
     );
   }
 }
@@ -63,8 +71,8 @@ export function validateRoboflowEnv(): void {
 export function validateOpenAIEnv(): void {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error(
-      'Missing required environment variable: OPENAI_API_KEY\n' +
-      'Copy .env.example to .env.local and fill in the values.'
+      "Missing required environment variable: OPENAI_API_KEY\n" +
+        "Copy .env.example to .env.local and fill in the values.",
     );
   }
 }

@@ -42,12 +42,22 @@ export async function continueConversation(
   messages: Message[],
   confidenceThreshold?: number,
 ): Promise<ConversationResult> {
-  const lastMessage = messages[messages.length - 1];
+  // Cap messages array to prevent excessive token usage / memory abuse
+  const MAX_MESSAGES = 50;
+  const trimmedMessages = messages.slice(-MAX_MESSAGES);
+
+  // Clamp confidence threshold to valid range server-side
+  const clampedThreshold =
+    confidenceThreshold !== undefined
+      ? Math.min(1, Math.max(0, confidenceThreshold))
+      : undefined;
+
+  const lastMessage = trimmedMessages[trimmedMessages.length - 1];
 
   if (!lastMessage || lastMessage.role !== "user") {
     return {
       messages: [
-        ...messages,
+        ...trimmedMessages,
         {
           role: "assistant",
           content: "⚠️ Invalid message format.",
@@ -72,15 +82,15 @@ export async function continueConversation(
   // If it's an image, process with Roboflow
   if (isImageDataUri || isImageUrl) {
     return await handleImageAnalysis(
-      messages,
+      trimmedMessages,
       userContent,
       isImageUrl,
-      confidenceThreshold,
+      clampedThreshold,
     );
   }
 
   // Otherwise, process as text chat with OpenAI
-  return await handleTextChat(messages);
+  return await handleTextChat(trimmedMessages);
 }
 
 /**
@@ -243,12 +253,16 @@ async function handleTextChat(
   messages: Message[],
 ): Promise<ConversationResult> {
   try {
-    // Sanitize user messages before sending to OpenAI
-    const formattedMessages = messages.map((msg) => ({
-      role: msg.role,
-      content:
-        msg.role === "user" ? sanitizeTextInput(msg.content) : msg.content,
-    }));
+    // Sanitize user messages and wrap with delimiters to mitigate prompt injection
+    const formattedMessages = messages.map((msg) => {
+      if (msg.role !== "user") return { role: msg.role, content: msg.content };
+      const sanitized = sanitizeTextInput(msg.content);
+      return {
+        role: msg.role,
+        // Delimiters prevent injected instructions from being interpreted as system commands
+        content: `<user_message>${sanitized}</user_message>`,
+      };
+    });
 
     const responseContent = await generateChatCompletion(formattedMessages);
 
@@ -280,6 +294,46 @@ async function handleTextChat(
 }
 
 /**
+ * Validate and sanitize a URL before fetching.
+ * Prevents SSRF by blocking private/internal IP ranges and non-HTTPS URLs.
+ */
+function validateFetchUrl(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "Invalid URL format.";
+  }
+
+  // Only allow HTTPS
+  if (parsed.protocol !== "https:") {
+    return "Only HTTPS URLs are supported.";
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Block private/internal ranges, metadata endpoints, and localhost
+  const blockedPatterns = [
+    /^localhost$/,
+    /^127\./,
+    /^10\./,
+    /^172\.(1[6-9]|2\d|3[01])\./,
+    /^192\.168\./,
+    /^169\.254\./, // link-local / AWS metadata
+    /^::1$/, // IPv6 loopback
+    /^fc00:/, // IPv6 private
+    /^fe80:/, // IPv6 link-local
+    /^0\./,
+  ];
+
+  if (blockedPatterns.some((pattern) => pattern.test(hostname))) {
+    return "URL points to a private or internal address, which is not allowed.";
+  }
+
+  return null; // valid
+}
+
+/**
  * Fetch image from URL and convert to data URI
  */
 async function fetchImageAsDataUri(url: string): Promise<{
@@ -287,6 +341,12 @@ async function fetchImageAsDataUri(url: string): Promise<{
   dataUri?: string;
   error?: string;
 }> {
+  // SSRF protection: validate URL before fetching
+  const urlError = validateFetchUrl(url);
+  if (urlError) {
+    return { success: false, error: urlError };
+  }
+
   try {
     const response = await fetch(url);
 

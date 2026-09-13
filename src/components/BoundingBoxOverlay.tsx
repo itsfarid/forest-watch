@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { RoboflowPrediction } from '@/lib/types/roboflow.types';
-import { validatePrediction } from '@/lib/canvas/drawBoxes';
+import { RoboflowPrediction } from "@/lib/types/roboflow.types";
+import { validatePrediction } from "@/lib/canvas/drawBoxes";
 
 interface BoundingBoxOverlayProps {
   imageUrl: string;
@@ -14,7 +14,11 @@ interface BoundingBoxOverlayProps {
  * Uses SVG elements instead of canvas to avoid base64 re-encoding and main thread blocking.
  * Box positions are computed as percentages so they scale correctly with the image.
  */
-export function BoundingBoxOverlay({ imageUrl, predictions, alt = 'Analyzed image' }: BoundingBoxOverlayProps) {
+export function BoundingBoxOverlay({
+  imageUrl,
+  predictions,
+  alt = "Analyzed image",
+}: BoundingBoxOverlayProps) {
   return (
     <div className="relative inline-block w-full">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -43,9 +47,7 @@ function ImageWithOverlay({
 }) {
   // Use an onLoad callback via a hidden img to get natural dimensions
   // We render the SVG absolutely over the visible img above
-  return (
-    <NaturalSizeOverlay imageUrl={imageUrl} predictions={predictions} />
-  );
+  return <NaturalSizeOverlay imageUrl={imageUrl} predictions={predictions} />;
 }
 
 /**
@@ -64,7 +66,10 @@ function NaturalSizeOverlay({
   // Since this is a client component and imageUrl is already loaded above,
   // we can read naturalWidth/Height from the already-rendered img element.
   // We pass dimensions via state after the visible img loads.
-  const [dimensions, setDimensions] = React.useState<{ width: number; height: number } | null>(null);
+  const [dimensions, setDimensions] = React.useState<{
+    width: number;
+    height: number;
+  } | null>(null);
 
   return (
     <>
@@ -87,14 +92,19 @@ function NaturalSizeOverlay({
           aria-label="Detection overlay"
         >
           {predictions.map((pred, idx) => {
-            const result = validatePrediction(pred, dimensions.width, dimensions.height);
+            const result = validatePrediction(
+              pred,
+              dimensions.width,
+              dimensions.height,
+            );
             if (!result.valid) return null;
 
             // Roboflow uses center x,y
             const boxX = pred.x - pred.width / 2;
             const boxY = pred.y - pred.height / 2;
             const color = getBoxColor(pred.confidence);
-            const label = `${pred.class} ${(pred.confidence * 100).toFixed(1)}%`;
+            // Sanitize class label — strip any characters that could break SVG rendering
+            const safeLabel = `${pred.class.replace(/[<>&"']/g, "").slice(0, 50)} ${(pred.confidence * 100).toFixed(1)}%`;
 
             return (
               <g key={`${idx}-${pred.class}-${pred.x}-${pred.y}`}>
@@ -113,7 +123,7 @@ function NaturalSizeOverlay({
                 <rect
                   x={boxX}
                   y={Math.max(boxY - dimensions.height * 0.035, 0)}
-                  width={label.length * dimensions.width * 0.012}
+                  width={safeLabel.length * dimensions.width * 0.012}
                   height={dimensions.height * 0.035}
                   fill={color}
                   fillOpacity={0.85}
@@ -122,13 +132,16 @@ function NaturalSizeOverlay({
                 {/* Label text */}
                 <text
                   x={boxX + dimensions.width * 0.005}
-                  y={Math.max(boxY - dimensions.height * 0.008, dimensions.height * 0.025)}
+                  y={Math.max(
+                    boxY - dimensions.height * 0.008,
+                    dimensions.height * 0.025,
+                  )}
                   fill="white"
                   fontSize={dimensions.height * 0.028}
                   fontWeight="bold"
                   fontFamily="Arial, sans-serif"
                 >
-                  {label}
+                  {safeLabel}
                 </text>
               </g>
             );
@@ -140,10 +153,10 @@ function NaturalSizeOverlay({
 }
 
 function getBoxColor(confidence: number): string {
-  if (confidence >= 0.9) return '#00FF00';
-  if (confidence >= 0.7) return '#FFA500';
-  return '#FF0000';
+  if (confidence >= 0.9) return "#00FF00";
+  if (confidence >= 0.7) return "#FFA500";
+  return "#FF0000";
 }
 
 // Import React for useState
-import React from 'react';
+import React from "react";

@@ -44,8 +44,8 @@ export async function checkAIAvailability(): Promise<{
     await client.models.list();
 
     return {
-      available: false,
-      message: "AI service is unavailable",
+      available: true,
+      message: "AI service is online",
     };
   } catch (error) {
     logger.error("AI availability check failed", {
